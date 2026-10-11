@@ -1,0 +1,29 @@
+{
+  "name": "@switchboard/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.4",
+    "@switchboard/core": "workspace:*",
+    "@switchboard/mock-provider": "workspace:*",
+    "hono": "4.13.13",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "openai": "7.32.0",
+    "tsx": "4.23.15",
+    "vitest": "5.0.3"
+  },
+  "files": [
+    "dist"
+  ]
+}
