@@ -12,7 +12,8 @@ The hard parts it is built to get right:
   context, and whose false-positive rate is measured, not guessed.
 
 > **Status: Week 1 of 6.** The streaming gateway, the chaos mock provider, tests, Docker and CI
-> are built. See [ROADMAP.md](ROADMAP.md) for what comes next.
+> are built and deployed to https://switchboard-gateway.vercel.app (API key required). See
+> [ROADMAP.md](ROADMAP.md) for what comes next.
 
 ## Try it
 

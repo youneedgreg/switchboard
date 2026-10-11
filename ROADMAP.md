@@ -214,13 +214,13 @@ Terraform for Vercel projects, domains and environment variables, Neon, Upstash,
 ## 7. Week-by-week plan
 
 ### Week 1: Foundations and a thin working version
-- [ ] Monorepo, linters, basic CI
-- [ ] docker-compose with pgvector, Redis and grafana/otel-lgtm
-- [ ] Mock provider with switches for each failure mode
-- [ ] Gateway `/v1/chat/completions` streaming from Mistral through the adapter
-- [ ] OpenAI SDK compatibility test
-- [ ] Deploy to `api.switchboard.temwa.dev`
-- [ ] Docs: design doc draft, C4 levels 1 and 2, ADRs 1–3
+- [x] Monorepo, linters, basic CI
+- [x] docker-compose with pgvector, Redis and grafana/otel-lgtm
+- [x] Mock provider with switches for each failure mode
+- [x] Gateway `/v1/chat/completions` streaming through the adapter (Mistral wired up; tested against a stubbed upstream until a real key is added)
+- [x] OpenAI SDK compatibility test
+- [x] Deploy to Vercel (`switchboard-gateway.vercel.app`); `api.switchboard.temwa.dev` waits on a DNS record
+- [x] Docs: design doc draft, C4 levels 1 and 2, ADRs 1–3
 
 **Done when:** `curl` streams through the deployed gateway.
 
