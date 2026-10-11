@@ -2,7 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "noEmit": true
+    "noEmit": true,
+    // Relative to this file, so the lookup still works when a deploy tool
+    // compiles through a generated config elsewhere (Vercel does).
+    "typeRoots": ["./node_modules/@types", "../../node_modules/@types"]
   },
   "include": ["src", "test"]
 }
