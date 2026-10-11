@@ -1,0 +1,83 @@
+# Local stack: `docker compose up --build`
+#   Gateway        http://localhost:8787   (key: GATEWAY_API_KEYS, default below)
+#   Mock provider  http://localhost:8788
+#   Grafana        http://localhost:3000   (traces, metrics, logs; admin/admin)
+# Postgres and Redis are provisioned now and used from Week 3.
+
+name: switchboard
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: infra/docker/node.Dockerfile
+      args:
+        APP: "@switchboard/gateway"
+    ports:
+      - "8787:8787"
+    environment:
+      GATEWAY_API_KEYS: ${GATEWAY_API_KEYS:-sb_local_dev_key_change_me}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      MOCK_BASE_URL: http://mock-provider:8788/v1
+      PORT: "8787"
+    depends_on:
+      mock-provider:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8787/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mock-provider:
+    build:
+      context: .
+      dockerfile: infra/docker/node.Dockerfile
+      args:
+        APP: "@switchboard/mock-provider"
+    ports:
+      - "8788:8788"
+    environment:
+      PORT: "8788"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8788/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg17-trixie
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: switchboard
+      POSTGRES_PASSWORD: switchboard
+      POSTGRES_DB: switchboard
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U switchboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8.8.3
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.36.0
+    ports:
+      - "3000:3000" # Grafana
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+
+volumes:
+  postgres-data:
