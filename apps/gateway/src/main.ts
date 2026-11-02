@@ -1,6 +1,6 @@
 /** Local / container entry point. */
 import { serve } from "@hono/node-server";
-import { loadConfig } from "./config.js";
+import { loadConfig, resilienceConfig } from "./config.js";
 import { createGateway } from "./gateway.js";
 import { buildRegistry } from "./providers/registry.js";
 
@@ -12,7 +12,11 @@ try {
 
 const config = loadConfig();
 const registry = buildRegistry(config);
-const app = createGateway({ apiKeys: config.GATEWAY_API_KEYS, registry });
+const app = createGateway({
+  apiKeys: config.GATEWAY_API_KEYS,
+  registry,
+  resilience: resilienceConfig(config),
+});
 
 serve({ fetch: app.fetch, port: config.PORT }, (info) => {
   console.log(`gateway listening on http://localhost:${info.port}`);

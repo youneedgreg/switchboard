@@ -2,14 +2,19 @@ import { ChatCompletionRequest, ProviderError, type StreamEvent } from "@switchb
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
-import { aggregate, prime, sseBody } from "./chat/response.js";
+import { aggregate, sseBody } from "./chat/response.js";
 import { bearerAuth } from "./http/auth.js";
 import { openAIError, providerErrorResponse } from "./http/errors.js";
 import { type ProviderRegistry, resolveModel } from "./providers/registry.js";
+import { runAttempts } from "./resilience/attempts.js";
+import { DEFAULT_RESILIENCE, type ResilienceConfig } from "./resilience/policy.js";
+import { inMemoryRetryBudget, type RetryBudget } from "./resilience/retry-budget.js";
 
 export interface GatewayOptions {
   apiKeys: readonly string[];
   registry: ProviderRegistry;
+  resilience?: ResilienceConfig;
+  retryBudget?: RetryBudget;
 }
 
 const SSE_HEADERS = {
@@ -18,7 +23,12 @@ const SSE_HEADERS = {
   "x-accel-buffering": "no",
 };
 
-export function createGateway({ apiKeys, registry }: GatewayOptions): Hono {
+export function createGateway({
+  apiKeys,
+  registry,
+  resilience = DEFAULT_RESILIENCE,
+  retryBudget = inMemoryRetryBudget(),
+}: GatewayOptions): Hono {
   const app = new Hono();
 
   app.onError((error, c) => {
@@ -81,27 +91,11 @@ export function createGateway({ apiKeys, registry }: GatewayOptions): Hono {
       );
     }
 
-    // One controller for the upstream call, aborted if the client disconnects.
+    // One controller for the request, aborted if the client disconnects.
     const upstream = new AbortController();
     c.req.raw.signal.addEventListener("abort", () => upstream.abort(c.req.raw.signal.reason), {
       once: true,
     });
-
-    let events: AsyncIterator<StreamEvent>;
-    try {
-      events = await prime(
-        resolved.adapter.stream({
-          model: resolved.upstreamModel,
-          body,
-          headers: c.req.raw.headers,
-          signal: upstream.signal,
-        }),
-      );
-    } catch (error) {
-      if (!(error instanceof ProviderError)) throw error;
-      const { status, body: errorBody, headers } = providerErrorResponse(error);
-      return c.json(errorBody, status, headers);
-    }
 
     const requestId = crypto.randomUUID();
     const meta = {
@@ -109,22 +103,42 @@ export function createGateway({ apiKeys, registry }: GatewayOptions): Hono {
       created: Math.floor(Date.now() / 1000),
       model: body.model,
     };
-    const headers = { "x-request-id": requestId, "x-switchboard-provider": resolved.adapter.name };
+    let attempts = 0;
+    const responseHeaders = () => ({
+      "x-request-id": requestId,
+      "x-switchboard-provider": resolved.adapter.name,
+      "x-switchboard-attempts": String(attempts),
+    });
 
-    if (!body.stream) {
-      try {
-        return c.json(await aggregate(events, meta), 200, headers);
-      } catch (error) {
-        if (!(error instanceof ProviderError)) throw error;
-        const { status, body: errorBody } = providerErrorResponse(error);
-        return c.json(errorBody, status, headers);
-      }
+    let events: AsyncIterator<StreamEvent>;
+    try {
+      events = await runAttempts({
+        adapter: resolved.adapter,
+        upstreamModel: resolved.upstreamModel,
+        body,
+        headers: c.req.raw.headers,
+        signal: upstream.signal,
+        commitOn: body.stream ? "first-token" : "complete",
+        config: resilience,
+        budget: retryBudget,
+        onAttempt: (attempt) => {
+          attempts = attempt;
+        },
+      });
+    } catch (error) {
+      // Nobody is left to read a response.
+      if (upstream.signal.aborted) return new Response(null, { status: 499 });
+      if (!(error instanceof ProviderError)) throw error;
+      const { status, body: errorBody, headers } = providerErrorResponse(error);
+      return c.json(errorBody, status, { ...headers, ...responseHeaders() });
     }
+
+    if (!body.stream) return c.json(await aggregate(events, meta), 200, responseHeaders());
 
     const includeUsage = body.stream_options?.include_usage === true;
     return new Response(
       sseBody(events, { ...meta, includeUsage }, (reason) => upstream.abort(reason)),
-      { headers: { ...SSE_HEADERS, ...headers } },
+      { headers: { ...SSE_HEADERS, ...responseHeaders() } },
     );
   });
 

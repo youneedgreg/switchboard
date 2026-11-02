@@ -24,6 +24,8 @@ export interface OpenAICompatibleConfig {
   requestUsage?: boolean;
   /** Client headers forwarded upstream unchanged. */
   forwardHeaders?: readonly string[];
+  /** Sends the attempt number upstream in this header (mock provider only). */
+  attemptHeader?: string;
   /** Rewrite the request body for upstream quirks. */
   transformBody?: (body: Record<string, unknown>) => Record<string, unknown>;
 }
@@ -56,9 +58,10 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
     model,
     body,
     headers,
+    attempt,
     signal,
   }: ProviderCall): AsyncGenerator<StreamEvent> {
-    const response = await send(model, body, headers, signal);
+    const response = await send(model, body, headers, attempt, signal);
     if (!response.body) {
       throw new ProviderError({
         provider: name,
@@ -137,6 +140,7 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
     model: string,
     body: ChatCompletionRequest,
     clientHeaders: Headers,
+    attempt: number,
     signal: AbortSignal,
   ): Promise<Response> {
     // stream_options is the gateway's business with its own client, not upstream's.
@@ -158,6 +162,7 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
       const value = clientHeaders.get(header);
       if (value !== null) headers[header] = value;
     }
+    if (config.attemptHeader) headers[config.attemptHeader] = String(attempt);
 
     let response: Response;
     try {

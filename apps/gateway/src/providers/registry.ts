@@ -1,4 +1,9 @@
-import { CHAOS_HEADER, createMockApp, MOCK_MODELS } from "@switchboard/mock-provider";
+import {
+  ATTEMPT_HEADER,
+  CHAOS_HEADER,
+  createMockApp,
+  MOCK_MODELS,
+} from "@switchboard/mock-provider";
 import type { Config } from "../config.js";
 import { openAICompatible } from "./openai-compatible.js";
 import type { ProviderAdapter } from "./types.js";
@@ -70,6 +75,7 @@ function mockAdapter(baseUrl: string | undefined): ProviderAdapter {
     baseUrl: baseUrl ?? "http://mock.internal/v1",
     models: MOCK_MODELS,
     forwardHeaders: [CHAOS_HEADER],
+    attemptHeader: ATTEMPT_HEADER,
     ...(app ? { fetch: async (input, init) => app.fetch(new Request(input, init)) } : {}),
   });
 }
