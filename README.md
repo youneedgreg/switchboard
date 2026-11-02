@@ -57,6 +57,7 @@ curl -N http://localhost:8787/v1/chat/completions \
 | `malformed_after=N` | Send invalid JSON before token N |
 | `error_after=N` | Send an in-stream error object before token N |
 | `fail_attempts=N` | Apply the faults only to the gateway's first N attempts |
+| `resume_overlap=N` | When continuing a partial answer, first repeat its last N characters |
 | `seed=42` | Make output and `fail_rate` deterministic |
 
 ## Run locally

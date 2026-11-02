@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChaosParseError, chaosForAttempt, failureStatus, parseChaos } from "../src/chaos.js";
-import { generateTokens, mulberry32 } from "../src/text.js";
+import { continueTokens, generateTokens, mulberry32 } from "../src/text.js";
 
 describe("parseChaos", () => {
   it("defaults to no chaos", () => {
@@ -63,5 +63,30 @@ describe("chaosForAttempt", () => {
     const chaos = parseChaos("drop_after=2; ttft_ms=50; tokens=5; seed=1; fail_attempts=1");
     expect(chaosForAttempt(chaos, 1)).toBe(chaos);
     expect(chaosForAttempt(chaos, 2)).toEqual({ ttft_ms: 0, token_ms: 0, tokens: 5, seed: 1 });
+  });
+});
+
+describe("continueTokens", () => {
+  const tokens = ["the", " quick", " brown", " fox"];
+
+  it("finishes a partial answer", () => {
+    expect(continueTokens(tokens, "the quick")).toEqual([" brown", " fox"]);
+  });
+
+  it("finishes one cut inside a token", () => {
+    expect(continueTokens(tokens, "the qui").join("")).toBe("ck brown fox");
+  });
+
+  it("repeats the end of the partial when told to", () => {
+    expect(continueTokens(tokens, "the quick", 5).join("")).toBe("quick brown fox");
+    expect(continueTokens(tokens, "the quick", 99).join("")).toBe("the quick brown fox");
+  });
+
+  it("gives the whole answer if the partial is not the start of it", () => {
+    expect(continueTokens(tokens, "something else").join("")).toBe("the quick brown fox");
+  });
+
+  it("gives nothing if the answer was already complete", () => {
+    expect(continueTokens(tokens, "the quick brown fox")).toEqual([]);
   });
 });

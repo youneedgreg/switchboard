@@ -39,6 +39,8 @@ export const Chaos = z.strictObject({
   error_after: position.optional(),
   /** Apply the faults above only to the first N attempts; later ones succeed. */
   fail_attempts: z.coerce.number().int().min(0).max(100).optional(),
+  /** When continuing a partial answer, first repeat its last N characters. */
+  resume_overlap: z.coerce.number().int().min(0).max(1_000_000).optional(),
   /** Seed for deterministic output and fail_rate decisions. */
   seed: z.coerce.number().int().optional(),
 });
@@ -71,7 +73,8 @@ export function parseChaos(header: string | null | undefined): Chaos {
 /** The chaos in effect for this attempt: once past fail_attempts, only the shape remains. */
 export function chaosForAttempt(chaos: Chaos, attempt: number): Chaos {
   if (chaos.fail_attempts === undefined || attempt <= chaos.fail_attempts) return chaos;
-  return Chaos.parse({ tokens: chaos.tokens, seed: chaos.seed });
+  const { tokens, seed, resume_overlap } = chaos;
+  return Chaos.parse({ tokens, seed, resume_overlap });
 }
 
 /** The status to fail with for this request, or undefined to succeed. */
