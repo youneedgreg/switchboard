@@ -22,6 +22,7 @@ const Env = z.object({
   GROQ_API_KEY: z.string().optional(),
   GROQ_BASE_URL: z.url().default("https://api.groq.com/openai/v1"),
   MOCK_BASE_URL: z.url().optional(),
+  REDIS_URL: z.url().optional(),
   PORT: z.coerce.number().int().positive().default(8787),
   RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(DEFAULT_RESILIENCE.maxAttempts),
   DEADLINE_FIRST_TOKEN_MS: positiveMs.default(DEFAULT_RESILIENCE.firstTokenMs),

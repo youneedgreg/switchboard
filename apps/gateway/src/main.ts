@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { loadConfig, resilienceConfig } from "./config.js";
 import { createGateway } from "./gateway.js";
 import { buildRegistry } from "./providers/registry.js";
+import { createStores } from "./resilience/stores.js";
 
 try {
   process.loadEnvFile();
@@ -17,6 +18,7 @@ const app = createGateway({
   registry,
   resilience: resilienceConfig(config),
   midStreamPolicy: config.MID_STREAM_POLICY,
+  ...createStores(config.REDIS_URL),
 });
 
 serve({ fetch: app.fetch, port: config.PORT }, (info) => {

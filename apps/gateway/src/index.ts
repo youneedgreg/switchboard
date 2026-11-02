@@ -6,6 +6,7 @@ import type { Hono } from "hono";
 import { loadConfig, resilienceConfig } from "./config.js";
 import { createGateway } from "./gateway.js";
 import { buildRegistry } from "./providers/registry.js";
+import { createStores } from "./resilience/stores.js";
 
 const config = loadConfig();
 
@@ -14,6 +15,7 @@ const app: Hono = createGateway({
   registry: buildRegistry(config),
   resilience: resilienceConfig(config),
   midStreamPolicy: config.MID_STREAM_POLICY,
+  ...createStores(config.REDIS_URL),
 });
 
 export default app;
