@@ -5,8 +5,12 @@
 import { type ChatCompletionRequest, CONTINUE_PROMPT } from "@switchboard/core";
 import type { ResumeStyle } from "../providers/types.js";
 
-/** Shorter matches are more likely to be coincidence than a repeat. */
-const MIN_OVERLAP = 4;
+/**
+ * Shorter matches may be the answer really repeating itself, like "that that".
+ * Wrongly keeping a short restart costs a small stutter; wrongly removing one
+ * deletes the answer's own words.
+ */
+const MIN_OVERLAP = 16;
 const CHARS_PER_TOKEN = 4;
 
 /**
@@ -66,6 +70,8 @@ export function overlapTrimmer(sent: string): OverlapTrimmer {
 
   const decide = (): string => {
     decided = true;
+    // A repeat of the whole answer so far is an echo, however short it is.
+    if (held.startsWith(sent)) return held.slice(sent.length);
     for (let length = Math.min(held.length, sent.length); length >= MIN_OVERLAP; length--) {
       if (sent.endsWith(held.slice(0, length))) return held.slice(length);
     }

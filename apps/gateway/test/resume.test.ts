@@ -23,6 +23,10 @@ describe("overlapTrimmer", () => {
     expect(trim("The quick brown", "The quick brown fox")).toBe(" fox");
   });
 
+  it("removes a whole echo even when it is too short to match otherwise", () => {
+    expect(trim("key", "key fallback")).toBe(" fallback");
+  });
+
   it("removes an echo split across pieces, without sending any of it", () => {
     const trimmer = overlapTrimmer("The quick brown");
     expect(trimmer.push("The qu")).toBe("");
@@ -32,11 +36,12 @@ describe("overlapTrimmer", () => {
   });
 
   it("removes a restart of the last few words", () => {
-    expect(trim("One sentence. The quick brown", "The quick brown fox")).toBe(" fox");
+    expect(trim("One sentence. The quick brown dog", "The quick brown dog runs")).toBe(" runs");
   });
 
-  it("keeps a short match, which is more likely coincidence", () => {
+  it("keeps a short match, which may be the answer repeating itself", () => {
     expect(trim("I like the", "the end")).toBe("the end");
+    expect(trim("fail that that", " that fail")).toBe(" that fail");
   });
 
   it("keeps text that only resembles the answer so far", () => {
@@ -51,8 +56,8 @@ describe("overlapTrimmer", () => {
     expect(trim("The quick brown", "The quick brown")).toBe("");
   });
 
-  it("handles a repeated phrase in the answer so far", () => {
-    expect(trim("again and again and", "again and more")).toBe(" more");
+  it("handles a phrase the answer so far already repeats", () => {
+    expect(trim("again and again and again and", "again and again and more")).toBe(" more");
   });
 });
 
@@ -172,7 +177,7 @@ describe("resuming through the gateway and mock provider", () => {
   );
 
   it.each([
-    ["a partial repeat", "resume_overlap=9"],
+    ["a partial repeat", "resume_overlap=20"],
     ["a whole echo", "resume_overlap=100000"],
   ])("removes %s from the continuation", async (_name, overlap) => {
     const expected = await uninterrupted("mock/mock-lorem");
