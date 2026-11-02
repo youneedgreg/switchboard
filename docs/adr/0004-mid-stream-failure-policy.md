@@ -52,3 +52,11 @@ Week 3 makes it a per-key setting.
 - Resumed answers must never enter the cache. Week 4 needs to honour this.
 - A failure after the finish chunk is treated as success: the answer is complete, and only the
   trailing usage or `[DONE]` was lost.
+
+## Amendment (2026-11-02)
+
+The chaos suite showed the overlap rule above was wrong in both directions, while the decision
+itself stands. A prefix echo shorter than 4 characters went untrimmed, and a repeat as short as 4
+characters could be the answer's own words, such as "that that". A repeat of the whole answer so
+far is now always removed, and any other repeat must be at least 16 characters. A short restart
+can now leave a small stutter, which is better than deleting what the model wrote.

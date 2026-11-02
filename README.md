@@ -11,8 +11,8 @@ The hard parts it is built to get right:
 - **Cache correctness.** A semantic cache that never answers one tenant with another tenant's
   context, and whose false-positive rate is measured, not guessed.
 
-> **Status: Week 1 of 6.** The streaming gateway, the chaos mock provider, tests, Docker and CI
-> are built and deployed to https://switchboard-gateway.vercel.app (API key required). See
+> **Status: Week 2 of 6.** The streaming gateway, retries, fallback, mid-stream resume, a circuit
+> breaker, the chaos mock provider and chaos tests, Docker and CI are built and deployed to https://switchboard-gateway.vercel.app (API key required). See
 > [ROADMAP.md](ROADMAP.md) for what comes next.
 
 ## Try it

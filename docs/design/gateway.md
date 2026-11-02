@@ -309,6 +309,18 @@ when aggregating a non-streaming response.
 - **Compatibility:** the official `openai` SDK against a real listening gateway: models, plain
   and streamed completions, usage chunks, `RateLimitError`, mid-stream `APIError`, and abort.
 
+- **Chaos** (`test/chaos.test.ts`), over real sockets from client to gateway to mock provider.
+  A matrix crosses each failure with each policy, position and request type, and asserts the exact
+  result. A randomized run then gives each attempt its own fault, 1,000 runs by default plus 250
+  with a live circuit breaker and a tight retry budget. `CHAOS_SEED` replays a run and `CHAOS_RUNS`
+  changes the count.
+
+  A client must receive either the complete answer, matching an uninterrupted one byte for byte, or
+  a clear error. A stream is broken if it has no `[DONE]` and no error, more than one role or
+  finish chunk, content after the finish, more than one id, or text that isn't a prefix of the
+  answer. A client that leaves must stop every upstream call and any further attempts. Billing and
+  span assertions join in Weeks 3 and 5.
+
 ## 7. Open questions
 
 - **Week 3:** per-key budgets require a cost estimate before the call; the maximum is

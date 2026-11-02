@@ -231,8 +231,8 @@ Terraform for Vercel projects, domains and environment variables, Neon, Upstash,
 - [x] Mid-stream resume and abort (real prefix and "continue" behaviour still to be smoke-tested)
 - [x] Cancel upstream on client disconnect
 - [x] Circuit breaker in Redis (tested on local Redis; Upstash waits on `REDIS_URL`)
-- [ ] Chaos test matrix
-- [ ] Docs: attempt and circuit-breaker state diagrams, mid-stream sequence diagram, ADR 4
+- [x] Chaos test matrix (billing and span assertions join in Weeks 3 and 5)
+- [x] Docs: attempt and circuit-breaker state diagrams, mid-stream sequence diagram, ADR 4
 
 **Done when:** 1,000 chaos runs produce zero broken streams.
 
