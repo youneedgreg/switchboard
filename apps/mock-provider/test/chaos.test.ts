@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChaosParseError, failureStatus, parseChaos } from "../src/chaos.js";
+import { ChaosParseError, chaosForAttempt, failureStatus, parseChaos } from "../src/chaos.js";
 import { generateTokens, mulberry32 } from "../src/text.js";
 
 describe("parseChaos", () => {
@@ -50,5 +50,18 @@ describe("generateTokens", () => {
   it("echoes the prompt", () => {
     expect(generateTokens("mock-echo", "ping pong").join("")).toBe("ping pong");
     expect(generateTokens("mock-echo", "a b", { count: 3 }).join("")).toBe("a b a");
+  });
+});
+
+describe("chaosForAttempt", () => {
+  it("applies faults to every attempt by default", () => {
+    const chaos = parseChaos("status=503");
+    expect(chaosForAttempt(chaos, 9)).toBe(chaos);
+  });
+
+  it("drops faults after fail_attempts but keeps the response shape", () => {
+    const chaos = parseChaos("drop_after=2; ttft_ms=50; tokens=5; seed=1; fail_attempts=1");
+    expect(chaosForAttempt(chaos, 1)).toBe(chaos);
+    expect(chaosForAttempt(chaos, 2)).toEqual({ ttft_ms: 0, token_ms: 0, tokens: 5, seed: 1 });
   });
 });

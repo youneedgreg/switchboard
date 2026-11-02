@@ -56,6 +56,7 @@ curl -N http://localhost:8787/v1/chat/completions \
 | `stall_after=N` | Stop sending, keep the connection open, before token N |
 | `malformed_after=N` | Send invalid JSON before token N |
 | `error_after=N` | Send an in-stream error object before token N |
+| `fail_attempts=N` | Apply the faults only to the gateway's first N attempts |
 | `seed=42` | Make output and `fail_rate` deterministic |
 
 ## Run locally
