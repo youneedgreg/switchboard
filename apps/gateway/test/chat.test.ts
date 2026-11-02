@@ -22,7 +22,13 @@ describe("auth and routing", () => {
       headers: { authorization: `Bearer ${TEST_KEY}` },
     });
     const body = (await res.json()) as { data: Array<{ id: string }> };
-    expect(body.data.map((m) => m.id)).toEqual(["mock/mock-lorem", "mock/mock-echo"]);
+    expect(body.data.map((m) => m.id)).toEqual([
+      "route/demo",
+      "mock/mock-lorem",
+      "mock/mock-echo",
+      "mock-backup/mock-lorem",
+      "mock-backup/mock-echo",
+    ]);
   });
 
   it("rejects unknown providers and invalid bodies", async () => {

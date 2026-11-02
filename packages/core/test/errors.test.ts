@@ -3,6 +3,7 @@ import {
   kindForStatus,
   kindForStreamError,
   ProviderError,
+  type ProviderErrorKind,
   parseRetryAfter,
 } from "../src/errors.js";
 
@@ -27,6 +28,14 @@ describe("ProviderError", () => {
     const permanent = ProviderError.fromStatus("mistral", 400, new Headers(), "bad");
     expect(transient.retryable).toBe(true);
     expect(permanent.retryable).toBe(false);
+  });
+
+  it("falls back on everything except a request that is itself wrong", () => {
+    const failure = (kind: ProviderErrorKind) =>
+      new ProviderError({ provider: "p", kind, message: "" });
+    expect(failure("auth").fallbackable).toBe(true);
+    expect(failure("rate_limited").fallbackable).toBe(true);
+    expect(failure("bad_request").fallbackable).toBe(false);
   });
 
   it("reads Retry-After", () => {

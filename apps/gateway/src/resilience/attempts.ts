@@ -1,6 +1,6 @@
 /**
- * The attempt loop: runs a request against a provider until one attempt reaches
- * the commit point, retrying the failures that came before it.
+ * The attempt loop: runs a request down a chain of providers until one attempt
+ * reaches the commit point, retrying or falling back from the failures before it.
  *
  * Nothing reaches the client before the commit point, so every failure up to
  * there is invisible. Streaming requests commit at the first content or
@@ -8,15 +8,26 @@
  * because the client sees nothing until the whole response is ready.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import { type ChatCompletionRequest, ProviderError, type StreamEvent } from "@switchboard/core";
+import {
+  type ChatCompletionRequest,
+  ProviderError,
+  type ProviderErrorKind,
+  type StreamEvent,
+} from "@switchboard/core";
 import type { ProviderAdapter } from "../providers/types.js";
 import { withDeadlines } from "./deadlines.js";
 import { type ResilienceConfig, retryDelayMs } from "./policy.js";
 import type { RetryBudget } from "./retry-budget.js";
 
-export interface AttemptRequest {
+export interface AttemptTarget {
   adapter: ProviderAdapter;
+  /** Upstream model id, without the "provider/" prefix. */
   upstreamModel: string;
+}
+
+export interface AttemptRequest {
+  /** Tried in order. A request naming one model has a chain of one. */
+  targets: readonly AttemptTarget[];
   body: ChatCompletionRequest;
   headers: Headers;
   /** Fires when the client has gone away. */
@@ -24,9 +35,15 @@ export interface AttemptRequest {
   commitOn: "first-token" | "complete";
   config: ResilienceConfig;
   budget: RetryBudget;
-  /** Told the number of each attempt as it starts. */
-  onAttempt?: (attempt: number) => void;
+  /** Told about each attempt as it starts, numbered across the whole chain. */
+  onAttempt?: (attempt: number, target: AttemptTarget) => void;
 }
+
+/**
+ * With a fallback ready, these are not worth retrying: a rate-limited provider
+ * will refuse again, and waiting on a slow one spends the request's deadline.
+ */
+const MOVE_ON_AT_ONCE: ReadonlySet<ProviderErrorKind> = new Set(["rate_limited", "timeout"]);
 
 /**
  * Resolves with the committed attempt's events, starting from its first event.
@@ -34,42 +51,61 @@ export interface AttemptRequest {
  * abort reason if the client disconnects.
  */
 export async function runAttempts(request: AttemptRequest): Promise<AsyncIterator<StreamEvent>> {
-  const { adapter, upstreamModel, body, headers, signal, commitOn, config, budget } = request;
+  const { targets, body, headers, signal, commitOn, config, budget } = request;
   const requestDeadline = Date.now() + config.totalMs;
-  await budget.recordRequest(adapter.name);
+  let attempt = 0;
 
-  for (let attempt = 1; ; attempt++) {
-    signal.throwIfAborted();
-    request.onAttempt?.(attempt);
-    const attemptAbort = new AbortController();
-    const events = withDeadlines(
-      adapter.stream({
-        model: upstreamModel,
-        body,
-        headers,
-        attempt,
-        signal: AbortSignal.any([signal, attemptAbort.signal]),
-      }),
-      {
-        provider: adapter.name,
-        firstTokenMs: config.firstTokenMs,
-        stallMs: config.stallMs,
-        requestDeadline,
-        abort: (reason) => attemptAbort.abort(reason),
-      },
-    );
+  for (const [index, target] of targets.entries()) {
+    const { adapter, upstreamModel } = target;
+    const hasFallback = index < targets.length - 1;
+    await budget.recordRequest(adapter.name);
 
-    try {
-      return await untilCommitted(events, adapter.name, commitOn);
-    } catch (error) {
-      attemptAbort.abort(error);
-      if (signal.aborted || !(error instanceof ProviderError)) throw error;
+    for (let tries = 1; ; tries++) {
+      signal.throwIfAborted();
+      attempt++;
+      request.onAttempt?.(attempt, target);
+      const attemptAbort = new AbortController();
+      const events = withDeadlines(
+        adapter.stream({
+          model: upstreamModel,
+          body,
+          headers,
+          attempt,
+          signal: AbortSignal.any([signal, attemptAbort.signal]),
+        }),
+        {
+          provider: adapter.name,
+          firstTokenMs: config.firstTokenMs,
+          stallMs: config.stallMs,
+          requestDeadline,
+          abort: (reason) => attemptAbort.abort(reason),
+        },
+      );
 
-      const delay = retryDelayMs(error, attempt, requestDeadline - Date.now(), config);
-      if (delay === undefined || !(await budget.tryRetry(adapter.name))) throw error;
-      await sleep(delay, undefined, { signal });
+      try {
+        return await untilCommitted(events, adapter.name, commitOn);
+      } catch (error) {
+        attemptAbort.abort(error);
+        if (signal.aborted || !(error instanceof ProviderError)) throw error;
+
+        const remainingMs = requestDeadline - Date.now();
+        if (remainingMs <= 0 || !error.fallbackable) throw error;
+
+        const delay =
+          hasFallback && MOVE_ON_AT_ONCE.has(error.kind)
+            ? undefined
+            : retryDelayMs(error, tries, remainingMs, config);
+        if (delay !== undefined && (await budget.tryRetry(adapter.name))) {
+          await sleep(delay, undefined, { signal });
+          continue;
+        }
+        if (hasFallback) break;
+        throw error;
+      }
     }
   }
+
+  throw new Error("runAttempts needs at least one target");
 }
 
 /** Holds events back until the commit point, then replays them. */

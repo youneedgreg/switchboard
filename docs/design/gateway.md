@@ -37,10 +37,17 @@ API, so any OpenAI SDK can use it by changing the base URL.
 | `POST` | `/v1/chat/completions` | OpenAI request body; `stream: true` returns SSE |
 
 Models are addressed as **`provider/model`**, for example `mistral/mistral-small-latest` or
-`mock/mock-lorem`. The prefix selects the adapter; the rest goes upstream unchanged. Week 2 adds
-named routes (for example `route/default`) that expand to a fallback chain.
+`mock/mock-lorem`. The prefix selects the adapter; the rest goes upstream unchanged. A model named
+this way gets retries but no fallback, because the client asked for that model specifically.
 
-Responses carry `x-request-id` and `x-switchboard-provider`. Errors use OpenAI's error shape,
+Named **routes** expand to a fallback chain. `route/default` is Mistral then Groq, keeping only the
+providers with an API key. `route/demo` is two instances of the mock provider. The real route
+never falls back to the mock, so a client can't be answered with lorem ipsum during an outage.
+Routes are defined in code until the `routes` table arrives in Week 3.
+
+Responses carry `x-request-id`, `x-switchboard-provider` and `x-switchboard-model`, which name
+what actually served the request, and `x-switchboard-attempts`. The response body keeps the model
+the client asked for. Errors use OpenAI's error shape,
 `{"error": {"message", "type", "code"}}`, so SDKs raise their usual exception classes.
 
 ## 4. Architecture
@@ -136,6 +143,20 @@ stops it:
 The wait between attempts is exponential backoff with full jitter (a uniform pick up to a ceiling
 that doubles from 200 ms to 4 s), or `Retry-After` if that is longer.
 
+**Fallback.** A route tries each provider in turn, and the limits above apply per provider except
+the total deadline, which is shared. Attempts are numbered across the whole chain.
+
+| Failure | Provider with a fallback ready | Last provider in the chain |
+|---|---|---|
+| `bad_request` | Stop: the request would fail anywhere | Stop |
+| `auth` | Fall back: the credentials are this provider's problem | Stop |
+| `rate_limited`, `timeout` | Fall back at once: retrying soon won't help | Retry |
+| `server`, `network`, `protocol` | Retry, then fall back | Retry |
+
+A fallback doesn't draw on the retry budget, since it loads a different provider, and it has no
+backoff. Spending the budget on one provider moves the request to the next. If the whole chain
+fails, the client gets the last provider's error.
+
 **Deadlines.** An attempt fails with `timeout` if its first token takes over 20 s, measured from the
 start of the attempt, or if 10 s pass between events after that. Timers race each read rather
 than relying on the adapter to notice an abort, so a stuck upstream can never hold a request
@@ -185,6 +206,6 @@ when aggregating a non-streaming response.
 
 ## 7. Open questions
 
-- **Week 2:** the mid-stream `resume` policy and fallback chains. See the roadmap.
+- **Week 2:** the mid-stream `resume` policy. See the roadmap.
 - **Week 3:** per-key budgets require a cost estimate before the call; the maximum is
   `max_tokens` × output price, but most requests omit `max_tokens`.

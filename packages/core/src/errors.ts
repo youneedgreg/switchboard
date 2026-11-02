@@ -48,6 +48,14 @@ export class ProviderError extends Error {
     return RETRYABLE.has(this.kind);
   }
 
+  /**
+   * Whether another provider could succeed. Only a request that is itself wrong
+   * would fail everywhere; bad credentials, for one, are this provider's problem.
+   */
+  get fallbackable(): boolean {
+    return this.kind !== "bad_request";
+  }
+
   static fromStatus(provider: string, status: number, headers: Headers, detail: string) {
     return new ProviderError({
       provider,

@@ -1,9 +1,11 @@
 import { ProviderError, type StreamEvent } from "@switchboard/core";
 import { describe, expect, it, vi } from "vitest";
+import { loadConfig } from "../src/config.js";
+import { buildRegistry, resolveTargets } from "../src/providers/registry.js";
 import type { ProviderAdapter, ProviderCall } from "../src/providers/types.js";
 import { runAttempts } from "../src/resilience/attempts.js";
 import { inMemoryRetryBudget } from "../src/resilience/retry-budget.js";
-import { chatRequest, FAST_RESILIENCE, sseData, testGateway } from "./helpers.js";
+import { chatRequest, FAST_RESILIENCE, sseData, TEST_KEY, testGateway } from "./helpers.js";
 
 const serverError = (provider = "script") =>
   new ProviderError({ provider, kind: "server", message: "boom", status: 503 });
@@ -62,8 +64,7 @@ const run = (
   overrides: Partial<Parameters<typeof runAttempts>[0]> = {},
 ) =>
   runAttempts({
-    adapter,
-    upstreamModel: "s",
+    targets: [{ adapter, upstreamModel: "s" }],
     body: { model: "script/s", messages: [{ role: "user", content: "x" }] },
     headers: new Headers(),
     signal: new AbortController().signal,
@@ -240,6 +241,178 @@ describe("client disconnects", () => {
     await expect(attempt).rejects.toBeDefined();
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(adapter.calls).toHaveLength(1);
+  });
+});
+
+describe("fallback chains", () => {
+  const chain = (...adapters: ProviderAdapter[]) =>
+    adapters.map((adapter) => ({ adapter, upstreamModel: "s" }));
+  const named = (name: string, adapter: ReturnType<typeof scripted>) =>
+    Object.assign(adapter, { name });
+  const failsWith = (init: Omit<ConstructorParameters<typeof ProviderError>[0], "provider">) =>
+    async function* (): AsyncGenerator<StreamEvent> {
+      yield* [];
+      throw new ProviderError({ provider: "primary", ...init });
+    };
+
+  it("exhausts retries on a provider, then moves to the next", async () => {
+    const primary = named("primary", scripted(failsAtOnce));
+    const backup = named("backup", scripted(healthy));
+    await drain(await run(primary, { targets: chain(primary, backup) }));
+    expect(primary.calls).toHaveLength(FAST_RESILIENCE.maxAttempts);
+    expect(backup.calls).toHaveLength(1);
+  });
+
+  it("numbers attempts across the whole chain", async () => {
+    const primary = named("primary", scripted(failsAtOnce));
+    const backup = named("backup", scripted(healthy));
+    const seen: Array<[number, string]> = [];
+    await run(primary, {
+      targets: chain(primary, backup),
+      onAttempt: (attempt, target) => seen.push([attempt, target.adapter.name]),
+    });
+    expect(seen).toEqual([
+      [1, "primary"],
+      [2, "primary"],
+      [3, "primary"],
+      [4, "backup"],
+    ]);
+    expect(backup.calls[0]?.attempt).toBe(4);
+  });
+
+  it.each([
+    ["a rate limit", { kind: "rate_limited", message: "429" }],
+    ["bad credentials", { kind: "auth", message: "401" }],
+  ] as const)("moves straight on after %s", async (_name, init) => {
+    const primary = named("primary", scripted(failsWith(init)));
+    const backup = named("backup", scripted(healthy));
+    await drain(await run(primary, { targets: chain(primary, backup) }));
+    expect(primary.calls).toHaveLength(1);
+    expect(backup.calls).toHaveLength(1);
+  });
+
+  it("moves straight on from a slow provider", async () => {
+    const primary = named("primary", scripted(hangs));
+    const backup = named("backup", scripted(healthy));
+    await drain(
+      await run(primary, {
+        targets: chain(primary, backup),
+        config: { ...FAST_RESILIENCE, firstTokenMs: 10 },
+      }),
+    );
+    expect(primary.calls).toHaveLength(1);
+    expect(backup.calls).toHaveLength(1);
+  });
+
+  it("still retries a rate limit on the last provider in the chain", async () => {
+    const primary = named("primary", scripted(failsWith({ kind: "rate_limited", message: "429" })));
+    await expect(run(primary)).rejects.toMatchObject({ kind: "rate_limited" });
+    expect(primary.calls).toHaveLength(FAST_RESILIENCE.maxAttempts);
+  });
+
+  it("does not try other providers with a request that is itself wrong", async () => {
+    const primary = named("primary", scripted(failsWith({ kind: "bad_request", message: "400" })));
+    const backup = named("backup", scripted(healthy));
+    await expect(run(primary, { targets: chain(primary, backup) })).rejects.toMatchObject({
+      kind: "bad_request",
+    });
+    expect(backup.calls).toHaveLength(0);
+  });
+
+  it("falls back when the retry budget is spent, without spending any", async () => {
+    const primary = named("primary", scripted(failsAtOnce));
+    const backup = named("backup", scripted(healthy));
+    const budget = inMemoryRetryBudget({ ratio: 0, minPerSecond: 0, windowSeconds: 10 });
+    await drain(await run(primary, { targets: chain(primary, backup), budget }));
+    expect(primary.calls).toHaveLength(1);
+    expect(backup.calls).toHaveLength(1);
+  });
+
+  it("throws the last provider's error when the whole chain fails", async () => {
+    const primary = named("primary", scripted(failsWith({ kind: "auth", message: "401" })));
+    const backup = named("backup", scripted(failsWith({ kind: "network", message: "reset" })));
+    await expect(run(primary, { targets: chain(primary, backup) })).rejects.toMatchObject({
+      kind: "network",
+    });
+  });
+
+  it("shares the total deadline across the chain", async () => {
+    const primary = named("primary", scripted(hangs));
+    const backup = named("backup", scripted(hangs));
+    const config = { ...FAST_RESILIENCE, firstTokenMs: 1_000, totalMs: 10 };
+    await expect(run(primary, { targets: chain(primary, backup), config })).rejects.toMatchObject({
+      message: expect.stringContaining("total deadline"),
+    });
+    expect(backup.calls).toHaveLength(0);
+  });
+
+  it("does not fall back after the first token", async () => {
+    const primary = named("primary", scripted(failsMidway));
+    const backup = named("backup", scripted(healthy));
+    const events = await run(primary, { targets: chain(primary, backup) });
+    await expect(drain(events)).rejects.toBeInstanceOf(ProviderError);
+    expect(backup.calls).toHaveLength(0);
+  });
+});
+
+describe("routes", () => {
+  const app = testGateway();
+  const chat = (body: Record<string, unknown>, chaos?: string) =>
+    app.request("/v1/chat/completions", chatRequest(body, chaos ? { chaos } : {}));
+
+  it("serves a route from its first provider when healthy", async () => {
+    const res = await chat({ model: "route/demo" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-switchboard-provider")).toBe("mock");
+    expect(res.headers.get("x-switchboard-model")).toBe("mock/mock-lorem");
+    const body = (await res.json()) as { model: string };
+    expect(body.model).toBe("route/demo");
+  });
+
+  it("falls back invisibly and names the provider that answered", async () => {
+    const res = await chat({ model: "route/demo", stream: true }, "status=503; fail_attempts=3");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-switchboard-provider")).toBe("mock-backup");
+    expect(res.headers.get("x-switchboard-attempts")).toBe("4");
+    const events = await sseData(res);
+    expect(events.at(-1)).toBe("[DONE]");
+    const chunks = events.slice(0, -1).map((e) => JSON.parse(e));
+    expect(new Set(chunks.map((c) => c.id)).size).toBe(1);
+    expect(chunks.every((c) => c.model === "route/demo")).toBe(true);
+    expect(chunks.filter((c) => c.choices[0]?.delta.role)).toHaveLength(1);
+  });
+
+  it("reports the last provider when the whole route fails", async () => {
+    const res = await chat({ model: "route/demo" }, "status=503");
+    expect(res.status).toBe(502);
+    expect(res.headers.get("x-switchboard-provider")).toBe("mock-backup");
+    expect(res.headers.get("x-switchboard-attempts")).toBe("6");
+  });
+
+  it("gives a model named directly no fallback", async () => {
+    const res = await chat({ model: "mock/mock-lorem" }, "status=503; fail_attempts=3");
+    expect(res.status).toBe(502);
+    expect(res.headers.get("x-switchboard-attempts")).toBe("3");
+  });
+
+  it("does not offer a route whose providers are all unconfigured", async () => {
+    expect((await chat({ model: "route/default" })).status).toBe(404);
+    expect((await chat({ model: "route/nope" })).status).toBe(404);
+  });
+
+  it("keeps only the configured providers of a route", () => {
+    const registry = buildRegistry(loadConfig({ GATEWAY_API_KEYS: TEST_KEY, GROQ_API_KEY: "g" }));
+    const targets = resolveTargets(registry, "route/default");
+    expect(targets.map((t) => t.adapter.name)).toEqual(["groq"]);
+    expect(targets[0]?.upstreamModel).toBe("llama-3.3-70b-versatile");
+  });
+
+  it("chains Mistral then Groq when both are configured", () => {
+    const registry = buildRegistry(
+      loadConfig({ GATEWAY_API_KEYS: TEST_KEY, GROQ_API_KEY: "g", MISTRAL_API_KEY: "m" }),
+    );
+    const targets = resolveTargets(registry, "route/default");
+    expect(targets.map((t) => t.adapter.name)).toEqual(["mistral", "groq"]);
   });
 });
 

@@ -227,7 +227,7 @@ Terraform for Vercel projects, domains and environment variables, Neon, Upstash,
 ### Week 2: Resilience (hard part A)
 - [x] Internal event stream, error classifier
 - [x] Backoff with retry budget (per instance until the Redis work), the three deadlines
-- [ ] Fallback chains, with Groq added as a second provider
+- [x] Fallback chains, with Groq added as a second provider (real Groq calls still to be smoke-tested)
 - [ ] Mid-stream resume and abort
 - [x] Cancel upstream on client disconnect
 - [ ] Circuit breaker in Redis
