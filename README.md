@@ -25,7 +25,7 @@ import OpenAI from "openai";
 const client = new OpenAI({ baseURL: "http://localhost:8787/v1", apiKey: "sb_local_dev_key_change_me" });
 
 const stream = await client.chat.completions.create({
-  model: "mock/mock-lorem", // or "mistral/mistral-small-latest"
+  model: "route/demo", // or "route/default" for Mistral with Groq as fallback
   messages: [{ role: "user", content: "Hello" }],
   stream: true,
 });
