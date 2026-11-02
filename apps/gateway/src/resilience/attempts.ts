@@ -18,6 +18,7 @@ import {
   type StreamEvent,
 } from "@switchboard/core";
 import type { ProviderAdapter } from "../providers/types.js";
+import type { CircuitBreaker } from "./circuit-breaker.js";
 import { withDeadlines } from "./deadlines.js";
 import { type MidStreamPolicy, type ResilienceConfig, retryDelayMs } from "./policy.js";
 import { canResumeRequest, continuationBody, overlapTrimmer } from "./resume.js";
@@ -40,6 +41,7 @@ export interface AttemptRequest {
   midStream: MidStreamPolicy;
   config: ResilienceConfig;
   budget: RetryBudget;
+  circuit: CircuitBreaker;
   /** Told about each attempt as it starts, numbered across the whole chain. */
   onAttempt?: (attempt: number, target: AttemptTarget) => void;
 }
@@ -73,7 +75,7 @@ interface CommittedAttempt {
 
 /** The position in the chain, shared by every attempt a request makes. */
 function attemptChain(request: AttemptRequest) {
-  const { targets, headers, signal, commitOn, config, budget } = request;
+  const { targets, headers, signal, commitOn, config, budget, circuit } = request;
   const requestDeadline = Date.now() + config.totalMs;
   let index = 0;
   let tries = 1;
@@ -89,10 +91,14 @@ function attemptChain(request: AttemptRequest) {
   /** Moves on to the next attempt, or rethrows if there is none. */
   const advance = async (error: unknown): Promise<void> => {
     if (signal.aborted || !(error instanceof ProviderError)) throw error;
+    const { adapter } = current();
+    // A request that is itself wrong says nothing bad about the provider.
+    if (error.fallbackable) await circuit.record(adapter.name, "failure");
+    else ignoreFailure(circuit.record(adapter.name, "success"));
+
     const remainingMs = requestDeadline - Date.now();
     if (remainingMs <= 0 || !error.fallbackable) throw error;
 
-    const { adapter } = current();
     const hasFallback = index < targets.length - 1;
     const delay =
       hasFallback && MOVE_ON_AT_ONCE.has(error.kind)
@@ -117,9 +123,25 @@ function attemptChain(request: AttemptRequest) {
       signal.throwIfAborted();
       const target = current();
       const { adapter, upstreamModel } = target;
+
+      const decision = await circuit.allow(adapter.name);
+      if (!decision.allowed) {
+        if (index === targets.length - 1) {
+          throw new ProviderError({
+            provider: adapter.name,
+            kind: "circuit_open",
+            message: `${adapter.name} is failing, so it was not called`,
+            retryAfterMs: decision.retryAfterMs,
+          });
+        }
+        index++;
+        tries = 1;
+        continue;
+      }
+
       if (recordedIndex !== index) {
         recordedIndex = index;
-        await budget.recordRequest(adapter.name);
+        ignoreFailure(budget.recordRequest(adapter.name));
       }
       attempt++;
       request.onAttempt?.(attempt, target);
@@ -142,8 +164,10 @@ function attemptChain(request: AttemptRequest) {
       );
 
       try {
+        const committed = await untilCommitted(events, adapter.name, commitOn);
+        ignoreFailure(circuit.record(adapter.name, "success"));
         return {
-          events: await untilCommitted(events, adapter.name, commitOn),
+          events: committed,
           target,
           attempt,
           abort: (reason) => attemptAbort.abort(reason),
@@ -156,6 +180,11 @@ function attemptChain(request: AttemptRequest) {
   };
 
   return { open, advance };
+}
+
+/** For bookkeeping not worth holding the response up for. */
+function ignoreFailure(work: Promise<unknown>): void {
+  work.catch(() => {});
 }
 
 /**

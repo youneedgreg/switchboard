@@ -7,6 +7,7 @@ import { bearerAuth } from "./http/auth.js";
 import { openAIError, providerErrorResponse } from "./http/errors.js";
 import { type ProviderRegistry, resolveTargets, routeIds } from "./providers/registry.js";
 import { type AttemptTarget, runAttempts } from "./resilience/attempts.js";
+import { type CircuitBreaker, inMemoryCircuitBreaker } from "./resilience/circuit-breaker.js";
 import {
   DEFAULT_RESILIENCE,
   MID_STREAM_POLICIES,
@@ -20,6 +21,7 @@ export interface GatewayOptions {
   registry: ProviderRegistry;
   resilience?: ResilienceConfig;
   retryBudget?: RetryBudget;
+  circuitBreaker?: CircuitBreaker;
   /** Default for requests without the header below. Per key from Week 3. */
   midStreamPolicy?: MidStreamPolicy;
 }
@@ -37,6 +39,7 @@ export function createGateway({
   registry,
   resilience = DEFAULT_RESILIENCE,
   retryBudget = inMemoryRetryBudget(),
+  circuitBreaker = inMemoryCircuitBreaker(),
   midStreamPolicy = "resume",
 }: GatewayOptions): Hono {
   const app = new Hono();
@@ -154,6 +157,7 @@ export function createGateway({
         midStream,
         config: resilience,
         budget: retryBudget,
+        circuit: circuitBreaker,
         onAttempt: (attempt, current) => {
           attempts = attempt;
           target = current;

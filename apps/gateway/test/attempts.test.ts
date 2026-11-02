@@ -5,7 +5,14 @@ import { buildRegistry, resolveTargets } from "../src/providers/registry.js";
 import type { ProviderAdapter, ProviderCall } from "../src/providers/types.js";
 import { runAttempts } from "../src/resilience/attempts.js";
 import { inMemoryRetryBudget } from "../src/resilience/retry-budget.js";
-import { chatRequest, FAST_RESILIENCE, sseData, TEST_KEY, testGateway } from "./helpers.js";
+import {
+  chatRequest,
+  FAST_RESILIENCE,
+  NEVER_OPENS,
+  sseData,
+  TEST_KEY,
+  testGateway,
+} from "./helpers.js";
 
 const serverError = (provider = "script") =>
   new ProviderError({ provider, kind: "server", message: "boom", status: 503 });
@@ -73,6 +80,7 @@ const run = (
     midStream: "abort",
     config: FAST_RESILIENCE,
     budget: generous(),
+    circuit: NEVER_OPENS,
     ...overrides,
   });
 

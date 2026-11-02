@@ -3,10 +3,19 @@ import { loadConfig } from "../src/config.js";
 import { createGateway } from "../src/gateway.js";
 import { buildRegistry } from "../src/providers/registry.js";
 import type { ProviderAdapter } from "../src/providers/types.js";
+import {
+  DEFAULT_CIRCUIT_BREAKER,
+  inMemoryCircuitBreaker,
+} from "../src/resilience/circuit-breaker.js";
 import { DEFAULT_RESILIENCE, type ResilienceConfig } from "../src/resilience/policy.js";
 import { inMemoryRetryBudget } from "../src/resilience/retry-budget.js";
 
 export const TEST_KEY = "sb_test_0123456789abcdef";
+
+export const NEVER_OPENS = inMemoryCircuitBreaker({
+  ...DEFAULT_CIRCUIT_BREAKER,
+  minFailures: Number.POSITIVE_INFINITY,
+});
 
 export const FAST_RESILIENCE: ResilienceConfig = {
   ...DEFAULT_RESILIENCE,
@@ -26,6 +35,7 @@ export function testGatewayWith(resilience: ResilienceConfig, ...extra: Provider
     registry,
     resilience,
     retryBudget: inMemoryRetryBudget({ ratio: 1, minPerSecond: 1_000, windowSeconds: 10 }),
+    circuitBreaker: NEVER_OPENS,
   });
 }
 
