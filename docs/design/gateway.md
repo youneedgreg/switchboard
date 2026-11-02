@@ -104,7 +104,8 @@ failure anywhere in it can be retried.
   timeouts, the upstream status for client errors, 502 otherwise.
 - **After the commit point**, the status line is already `200`. A failure is reported in-band as
   a final SSE `data: {"error": ...}` event, with no `[DONE]`. The OpenAI SDK turns this into an
-  `APIError` while iterating. Week 2 adds the `resume` policy here.
+  `APIError` while iterating. Under the `resume` policy this only happens once nothing can
+  complete the answer (section 4.4).
 
 ```mermaid
 sequenceDiagram
@@ -169,14 +170,59 @@ circuit breaker.
 
 Responses report the attempts used in `x-switchboard-attempts`.
 
-### 4.4 Client disconnects
+### 4.4 Mid-stream failures
+
+[ADR 4](../adr/0004-mid-stream-failure-policy.md) has the reasoning. Each request runs under one of
+two policies: `resume` (the default) or `abort`. `MID_STREAM_POLICY` sets the default, and
+`x-switchboard-mid-stream` overrides it for a request.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant G as Gateway
+    participant M as Mistral
+    participant Q as Groq
+    C->>G: POST /v1/chat/completions (route/default, stream)
+    G->>M: stream
+    M-->>G: role chunk, first token
+    G-->>C: 200, role chunk, first token
+    M-->>G: more tokens
+    G-->>C: more tokens
+    M--xG: connection lost
+    Note over G: abort attempt, keep the client's stream open
+    G->>M: retry with the partial answer (prefix)
+    M--xG: 503
+    Note over G: retries used up, fall back
+    G->>Q: partial answer + "continue" message
+    Q-->>G: repeats the last words, then new tokens
+    Note over G: hold while it could be a repeat, remove the overlap
+    G-->>C: new tokens only
+    Q-->>G: finish, usage
+    G-->>C: finish chunk with switchboard record, [DONE]
+```
+
+A resume is an ordinary attempt, using the rules in section 4.3 and sharing the total deadline. It
+doesn't happen after a tool call has been sent, for structured output, or after a `bad_request`.
+The finish chunk of a resumed stream records what happened, because the headers left too early to:
+
+```json
+"switchboard": { "resumed": true, "resumes": 1, "provider": "groq",
+                 "model": "groq/llama-3.3-70b-versatile", "attempts": 3 }
+```
+
+A failure after the finish chunk is ignored: the answer is complete, and at worst the trailing
+usage is missing. A stream that ends with no finish at all counts as a failure, so a broken answer
+can never look complete.
+
+### 4.5 Client disconnects
 
 Each request owns an `AbortController`, and each attempt derives its own signal from it, so a
 deadline can stop one attempt without ending the request. The request's controller is aborted
 when the client's request signal fires or when the response stream is cancelled. That stops the
 upstream generation and its cost, cuts short any backoff, and prevents further attempts.
 
-### 4.5 Output formatting
+### 4.6 Output formatting
 
 The gateway re-emits chunks under **its own** response id and the model name the client sent.
 Upstream ids would change mid-response once fallbacks exist. Usage is held back and sent as the
@@ -201,11 +247,13 @@ when aggregating a non-streaming response.
 - Attempt loop: backoff, retry budget, each of the three deadlines, an adapter that ignores its
   abort, and disconnects during an attempt and during backoff. The mock's `fail_attempts` switch
   limits faults to the first N attempts, so retries can be tested end to end.
+- Resume: the mock produces the same answer for the same prompt and can continue from a partial
+  one, so a resumed answer must match an uninterrupted one byte for byte, including with injected
+  overlap (`resume_overlap`) and across providers.
 - **Compatibility:** the official `openai` SDK against a real listening gateway: models, plain
   and streamed completions, usage chunks, `RateLimitError`, mid-stream `APIError`, and abort.
 
 ## 7. Open questions
 
-- **Week 2:** the mid-stream `resume` policy. See the roadmap.
 - **Week 3:** per-key budgets require a cost estimate before the call; the maximum is
   `max_tokens` × output price, but most requests omit `max_tokens`.
