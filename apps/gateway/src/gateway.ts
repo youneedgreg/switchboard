@@ -7,7 +7,12 @@ import { bearerAuth } from "./http/auth.js";
 import { openAIError, providerErrorResponse } from "./http/errors.js";
 import { type ProviderRegistry, resolveTargets, routeIds } from "./providers/registry.js";
 import { type AttemptTarget, runAttempts } from "./resilience/attempts.js";
-import { DEFAULT_RESILIENCE, type ResilienceConfig } from "./resilience/policy.js";
+import {
+  DEFAULT_RESILIENCE,
+  MID_STREAM_POLICIES,
+  type MidStreamPolicy,
+  type ResilienceConfig,
+} from "./resilience/policy.js";
 import { inMemoryRetryBudget, type RetryBudget } from "./resilience/retry-budget.js";
 
 export interface GatewayOptions {
@@ -15,7 +20,11 @@ export interface GatewayOptions {
   registry: ProviderRegistry;
   resilience?: ResilienceConfig;
   retryBudget?: RetryBudget;
+  /** Default for requests without the header below. Per key from Week 3. */
+  midStreamPolicy?: MidStreamPolicy;
 }
+
+const MID_STREAM_HEADER = "x-switchboard-mid-stream";
 
 const SSE_HEADERS = {
   "content-type": "text/event-stream; charset=utf-8",
@@ -28,6 +37,7 @@ export function createGateway({
   registry,
   resilience = DEFAULT_RESILIENCE,
   retryBudget = inMemoryRetryBudget(),
+  midStreamPolicy = "resume",
 }: GatewayOptions): Hono {
   const app = new Hono();
 
@@ -100,6 +110,18 @@ export function createGateway({
       );
     }
 
+    const midStream = c.req.header(MID_STREAM_HEADER) ?? midStreamPolicy;
+    if (!isMidStreamPolicy(midStream)) {
+      return c.json(
+        openAIError(
+          `${MID_STREAM_HEADER} must be one of: ${MID_STREAM_POLICIES.join(", ")}`,
+          "invalid_request_error",
+          "invalid_mid_stream_policy",
+        ),
+        400,
+      );
+    }
+
     // One controller for the request, aborted if the client disconnects.
     const upstream = new AbortController();
     c.req.raw.signal.addEventListener("abort", () => upstream.abort(c.req.raw.signal.reason), {
@@ -129,6 +151,7 @@ export function createGateway({
         headers: c.req.raw.headers,
         signal: upstream.signal,
         commitOn: body.stream ? "first-token" : "complete",
+        midStream,
         config: resilience,
         budget: retryBudget,
         onAttempt: (attempt, current) => {
@@ -154,4 +177,8 @@ export function createGateway({
   });
 
   return app;
+}
+
+function isMidStreamPolicy(value: string): value is MidStreamPolicy {
+  return (MID_STREAM_POLICIES as readonly string[]).includes(value);
 }

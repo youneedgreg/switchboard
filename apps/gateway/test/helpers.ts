@@ -15,19 +15,23 @@ export const FAST_RESILIENCE: ResilienceConfig = {
 };
 
 export function testGateway(...extra: ProviderAdapter[]) {
+  return testGatewayWith(FAST_RESILIENCE, ...extra);
+}
+
+export function testGatewayWith(resilience: ResilienceConfig, ...extra: ProviderAdapter[]) {
   const registry = new Map(buildRegistry(loadConfig({ GATEWAY_API_KEYS: TEST_KEY })));
   for (const adapter of extra) registry.set(adapter.name, adapter);
   return createGateway({
     apiKeys: [TEST_KEY],
     registry,
-    resilience: FAST_RESILIENCE,
+    resilience,
     retryBudget: inMemoryRetryBudget({ ratio: 1, minPerSecond: 1_000, windowSeconds: 10 }),
   });
 }
 
 export function chatRequest(
   body: Record<string, unknown>,
-  options: { chaos?: string; signal?: AbortSignal } = {},
+  options: { chaos?: string; midStream?: string; signal?: AbortSignal } = {},
 ): RequestInit {
   return {
     method: "POST",
@@ -35,6 +39,7 @@ export function chatRequest(
       authorization: `Bearer ${TEST_KEY}`,
       "content-type": "application/json",
       ...(options.chaos ? { "x-mock-chaos": options.chaos } : {}),
+      ...(options.midStream ? { "x-switchboard-mid-stream": options.midStream } : {}),
     },
     body: JSON.stringify({ messages: [{ role: "user", content: "hello gateway" }], ...body }),
     ...(options.signal ? { signal: options.signal } : {}),

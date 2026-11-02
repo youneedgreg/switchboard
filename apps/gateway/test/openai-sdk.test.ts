@@ -76,6 +76,26 @@ describe("OpenAI SDK compatibility", () => {
     await expect(consume()).rejects.toBeInstanceOf(OpenAI.APIError);
   });
 
+  it("completes a resumed stream with no error, and exposes the record", async () => {
+    const collect = async (chaos?: string) => {
+      const stream = await client.chat.completions.create(
+        { model: "route/demo", messages, stream: true },
+        chaos ? { headers: { "x-mock-chaos": chaos } } : {},
+      );
+      let text = "";
+      let record: unknown;
+      for await (const chunk of stream) {
+        text += chunk.choices[0]?.delta.content ?? "";
+        record ??= (chunk as unknown as { switchboard?: unknown }).switchboard;
+      }
+      return { text, record };
+    };
+    const { text: expected } = await collect();
+    const { text, record } = await collect("drop_after=4; fail_attempts=3");
+    expect(text).toBe(expected);
+    expect(record).toMatchObject({ resumed: true, provider: "mock-backup" });
+  });
+
   it("lets the client abort a stalled stream", async () => {
     const controller = new AbortController();
     const stream = await client.chat.completions.create(
