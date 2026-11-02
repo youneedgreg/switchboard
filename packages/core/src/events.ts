@@ -11,4 +11,6 @@ export type StreamEvent =
   | { type: "start"; upstreamId: string; model: string }
   | { type: "delta"; content?: string; toolCalls?: unknown[] }
   | { type: "usage"; inputTokens: number; outputTokens: number }
-  | { type: "finish"; reason: FinishReason };
+  | { type: "finish"; reason: FinishReason }
+  // Added by the gateway, never by an adapter: the answer continues on a new attempt.
+  | { type: "resume"; provider: string; model: string; attempt: number };
