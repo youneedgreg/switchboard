@@ -5,8 +5,8 @@ import { z } from "zod";
 import { aggregate, sseBody } from "./chat/response.js";
 import { bearerAuth } from "./http/auth.js";
 import { openAIError, providerErrorResponse } from "./http/errors.js";
-import { type ProviderRegistry, resolveModel } from "./providers/registry.js";
-import { runAttempts } from "./resilience/attempts.js";
+import { type ProviderRegistry, resolveTargets, routeIds } from "./providers/registry.js";
+import { type AttemptTarget, runAttempts } from "./resilience/attempts.js";
 import { DEFAULT_RESILIENCE, type ResilienceConfig } from "./resilience/policy.js";
 import { inMemoryRetryBudget, type RetryBudget } from "./resilience/retry-budget.js";
 
@@ -58,14 +58,22 @@ export function createGateway({
   app.get("/v1/models", (c) =>
     c.json({
       object: "list",
-      data: [...registry.values()].flatMap((adapter) =>
-        adapter.models.map((model) => ({
-          id: `${adapter.name}/${model}`,
+      data: [
+        ...routeIds(registry).map((id) => ({
+          id,
           object: "model",
           created: 0,
-          owned_by: adapter.name,
+          owned_by: "switchboard",
         })),
-      ),
+        ...[...registry.values()].flatMap((adapter) =>
+          adapter.models.map((model) => ({
+            id: `${adapter.name}/${model}`,
+            object: "model",
+            created: 0,
+            owned_by: adapter.name,
+          })),
+        ),
+      ],
     }),
   );
 
@@ -79,11 +87,12 @@ export function createGateway({
     }
     const body = parsed.data;
 
-    const resolved = resolveModel(registry, body.model);
-    if (!resolved) {
+    const targets = resolveTargets(registry, body.model);
+    const firstTarget = targets[0];
+    if (!firstTarget) {
       return c.json(
         openAIError(
-          `Unknown model "${body.model}". Models are named "provider/model"; see GET /v1/models.`,
+          `Unknown model "${body.model}". Models are named "provider/model" or "route/name"; see GET /v1/models.`,
           "invalid_request_error",
           "model_not_found",
         ),
@@ -104,25 +113,27 @@ export function createGateway({
       model: body.model,
     };
     let attempts = 0;
+    let target: AttemptTarget = firstTarget;
     const responseHeaders = () => ({
       "x-request-id": requestId,
-      "x-switchboard-provider": resolved.adapter.name,
+      "x-switchboard-provider": target.adapter.name,
+      "x-switchboard-model": `${target.adapter.name}/${target.upstreamModel}`,
       "x-switchboard-attempts": String(attempts),
     });
 
     let events: AsyncIterator<StreamEvent>;
     try {
       events = await runAttempts({
-        adapter: resolved.adapter,
-        upstreamModel: resolved.upstreamModel,
+        targets,
         body,
         headers: c.req.raw.headers,
         signal: upstream.signal,
         commitOn: body.stream ? "first-token" : "complete",
         config: resilience,
         budget: retryBudget,
-        onAttempt: (attempt) => {
+        onAttempt: (attempt, current) => {
           attempts = attempt;
+          target = current;
         },
       });
     } catch (error) {
