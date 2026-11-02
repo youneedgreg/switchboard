@@ -42,16 +42,19 @@ export function sseBody(
   } as const;
   let usage: Usage | undefined;
   let closed = false;
+  let resumed: Extract<StreamEvent, { type: "resume" }> | undefined;
+  let resumes = 0;
 
   const chunk = (
     delta: ChatCompletionChunk["choices"][number]["delta"],
     finish: FinishReason | null = null,
+    extra: Record<string, unknown> = {},
   ): string => {
     const payload: ChatCompletionChunk = {
       ...base,
       choices: [{ index: 0, delta, finish_reason: finish }],
     };
-    return encodeSse(JSON.stringify(payload));
+    return encodeSse(JSON.stringify({ ...payload, ...extra }));
   };
 
   const render = (event: StreamEvent): string | undefined => {
@@ -66,8 +69,28 @@ export function sseBody(
       case "usage":
         usage = toUsage(event);
         return undefined;
+      case "resume":
+        resumed = event;
+        resumes++;
+        return undefined;
       case "finish":
-        return chunk({}, event.reason);
+        // Headers went out before any resume happened, so the record goes here.
+        // SDKs ignore fields they don't know.
+        return chunk(
+          {},
+          event.reason,
+          resumed
+            ? {
+                switchboard: {
+                  resumed: true,
+                  resumes,
+                  provider: resumed.provider,
+                  model: resumed.model,
+                  attempts: resumed.attempt,
+                },
+              }
+            : {},
+        );
     }
   };
 
@@ -75,7 +98,7 @@ export function sseBody(
     async pull(controller) {
       if (closed) return;
       try {
-        // Keep pulling until there is something to send (usage events are held back).
+        // Keep pulling until there is something to send (some events are not sent).
         for (;;) {
           const { value: event, done } = await events.next();
           if (done) {

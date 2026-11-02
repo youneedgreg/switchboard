@@ -136,6 +136,7 @@ describe("client disconnects", () => {
     const endless: ProviderAdapter = {
       name: "endless",
       models: ["forever"],
+      resumeStyle: "prompt",
       async *stream({ signal }: ProviderCall): AsyncGenerator<StreamEvent> {
         upstreamSignal = signal;
         yield { type: "start", upstreamId: "x", model: "forever" };
@@ -163,6 +164,7 @@ describe("tool calls", () => {
     const tools: ProviderAdapter = {
       name: "tools",
       models: ["t"],
+      resumeStyle: "prompt",
       async *stream(): AsyncGenerator<StreamEvent> {
         yield { type: "start", upstreamId: "x", model: "t" };
         yield {

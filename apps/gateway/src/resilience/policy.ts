@@ -4,6 +4,10 @@
  */
 import type { ProviderError } from "@switchboard/core";
 
+/** What to do when a stream fails after the client has received tokens. */
+export const MID_STREAM_POLICIES = ["resume", "abort"] as const;
+export type MidStreamPolicy = (typeof MID_STREAM_POLICIES)[number];
+
 export interface ResilienceConfig {
   /** Attempts per request, including the first. */
   maxAttempts: number;

@@ -8,6 +8,7 @@ import {
   type ChatCompletionChunk,
   ChatCompletionRequest,
   type ChatMessage,
+  CONTINUE_PROMPT,
   encodeSse,
   type OpenAIErrorBody,
   type Usage,
@@ -23,7 +24,14 @@ import {
   failureStatus,
   parseChaos,
 } from "./chaos.js";
-import { estimateTokens, generateTokens, MOCK_MODELS, type MockModel, mulberry32 } from "./text.js";
+import {
+  continueTokens,
+  estimateTokens,
+  generateTokens,
+  MOCK_MODELS,
+  type MockModel,
+  mulberry32,
+} from "./text.js";
 
 function errorBody(message: string, type: string, code: string | null = null): OpenAIErrorBody {
   return { error: { message, type, code } };
@@ -37,6 +45,22 @@ function textOf(message: ChatMessage): string {
 
 function isMockModel(model: string): model is MockModel {
   return (MOCK_MODELS as readonly string[]).includes(model);
+}
+
+/** Finds a partial answer to continue, in either form a gateway sends one. */
+function splitContinuation(messages: ChatMessage[]): {
+  partial?: string;
+  messages: ChatMessage[];
+} {
+  const last = messages.at(-1);
+  const previous = messages.at(-2);
+  if (last?.role === "assistant") {
+    return { partial: textOf(last), messages: messages.slice(0, -1) };
+  }
+  if (previous?.role === "assistant" && last?.content === CONTINUE_PROMPT) {
+    return { partial: textOf(previous), messages: messages.slice(0, -2) };
+  }
+  return { messages };
 }
 
 export function createMockApp(): Hono {
@@ -92,11 +116,13 @@ export function createMockApp(): Hono {
       );
     }
 
-    const lastUser = request.messages.findLast((m) => m.role === "user");
-    const tokens = generateTokens(request.model, lastUser ? textOf(lastUser) : "", {
+    const { partial, messages } = splitContinuation(request.messages);
+    const lastUser = messages.findLast((m) => m.role === "user");
+    let tokens = generateTokens(request.model, lastUser ? textOf(lastUser) : "", {
       count: chaos.tokens,
       seed: chaos.seed,
     });
+    if (partial !== undefined) tokens = continueTokens(tokens, partial, chaos.resume_overlap);
     const promptTokens = estimateTokens(request.messages.map(textOf).join("\n"));
     const usage: Usage = {
       prompt_tokens: promptTokens,

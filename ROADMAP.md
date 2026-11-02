@@ -79,7 +79,7 @@ load/               k6 scripts
 - **Circuit breaker for each provider**, with its state kept in Redis. It moves between closed, open and half-open.
 - **The key rule:** until the first byte reaches the client, every failure can be retried invisibly. After tokens have been sent, each key chooses a policy:
   - `abort`: send a final SSE error event and stop.
-  - `resume`: send the partial answer to the next attempt so it continues from there. Mistral supports this directly through a `prefix` assistant message; other providers fall back to a "continue" prompt. Remove any overlapping text, mark the response `x-switchboard-resumed: true`, and record the fact in the final event.
+  - `resume`: send the partial answer to the next attempt so it continues from there. Mistral supports this directly through a `prefix` assistant message; other providers fall back to a "continue" prompt. Remove any overlapping text and record the fact in the final event; response headers have already been sent by then.
 - **Client disconnects:** when the client disconnects, an `AbortController` cancels the upstream request, so you stop paying for tokens nobody will read.
 - **Billing across attempts:** every attempt is billed, including partial failed ones, because providers charge for them.
 
@@ -228,7 +228,7 @@ Terraform for Vercel projects, domains and environment variables, Neon, Upstash,
 - [x] Internal event stream, error classifier
 - [x] Backoff with retry budget (per instance until the Redis work), the three deadlines
 - [x] Fallback chains, with Groq added as a second provider (real Groq calls still to be smoke-tested)
-- [ ] Mid-stream resume and abort
+- [x] Mid-stream resume and abort (real prefix and "continue" behaviour still to be smoke-tested)
 - [x] Cancel upstream on client disconnect
 - [ ] Circuit breaker in Redis
 - [ ] Chaos test matrix

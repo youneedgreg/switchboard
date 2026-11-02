@@ -16,6 +16,7 @@ const app = createGateway({
   apiKeys: config.GATEWAY_API_KEYS,
   registry,
   resilience: resilienceConfig(config),
+  midStreamPolicy: config.MID_STREAM_POLICY,
 });
 
 serve({ fetch: app.fetch, port: config.PORT }, (info) => {

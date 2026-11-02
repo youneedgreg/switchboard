@@ -13,6 +13,7 @@ const app: Hono = createGateway({
   apiKeys: config.GATEWAY_API_KEYS,
   registry: buildRegistry(config),
   resilience: resilienceConfig(config),
+  midStreamPolicy: config.MID_STREAM_POLICY,
 });
 
 export default app;

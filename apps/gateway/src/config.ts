@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { DEFAULT_RESILIENCE, type ResilienceConfig } from "./resilience/policy.js";
+import {
+  DEFAULT_RESILIENCE,
+  MID_STREAM_POLICIES,
+  type ResilienceConfig,
+} from "./resilience/policy.js";
 
 const positiveMs = z.coerce.number().int().positive();
 
@@ -23,6 +27,7 @@ const Env = z.object({
   DEADLINE_FIRST_TOKEN_MS: positiveMs.default(DEFAULT_RESILIENCE.firstTokenMs),
   DEADLINE_STALL_MS: positiveMs.default(DEFAULT_RESILIENCE.stallMs),
   DEADLINE_TOTAL_MS: positiveMs.default(DEFAULT_RESILIENCE.totalMs),
+  MID_STREAM_POLICY: z.enum(MID_STREAM_POLICIES).default("resume"),
 });
 
 export type Config = z.infer<typeof Env>;

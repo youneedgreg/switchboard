@@ -9,8 +9,9 @@ edited after acceptance; a later record supersedes an earlier one instead.
 | [0001](0001-monorepo-tooling.md) | One repo with pnpm workspaces, Turborepo and uv | Accepted |
 | [0002](0002-hono-on-node-runtime.md) | Hono on the Node.js runtime for the gateway | Accepted |
 | [0003](0003-openai-compatible-api.md) | OpenAI-compatible API, streaming upstream always | Accepted |
+| [0004](0004-mid-stream-failure-policy.md) | Mid-stream failures: resume by default, abort on request | Accepted |
 
-Planned (see the roadmap): mid-stream failure policy, semantic cache scoping, integer money,
+Planned (see the roadmap): semantic cache scoping, integer money,
 budget reservations, schema ownership per service, GitHub Actions as scheduler, pinning the
 OpenTelemetry GenAI conventions.
 

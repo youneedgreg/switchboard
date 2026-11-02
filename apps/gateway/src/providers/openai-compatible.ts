@@ -11,13 +11,15 @@ import {
   parseSse,
   type StreamEvent,
 } from "@switchboard/core";
-import type { ProviderAdapter, ProviderCall } from "./types.js";
+import type { ProviderAdapter, ProviderCall, ResumeStyle } from "./types.js";
 
 export interface OpenAICompatibleConfig {
   name: string;
   baseUrl: string;
   apiKey?: string;
   models: readonly string[];
+  /** Defaults to "prompt", which every provider understands. */
+  resumeStyle?: ResumeStyle;
   /** Injected for tests and for the in-process mock provider. */
   fetch?: typeof fetch;
   /** Ask for a trailing usage chunk with stream_options (OpenAI, Groq). */
@@ -202,7 +204,7 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
     }
   }
 
-  return { name, models: config.models, stream };
+  return { name, models: config.models, resumeStyle: config.resumeStyle ?? "prompt", stream };
 }
 
 /** Content is usually a string, but some models (e.g. Mistral reasoning) send parts. */

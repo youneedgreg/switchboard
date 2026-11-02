@@ -7,7 +7,7 @@ import {
 import type { Config } from "../config.js";
 import type { AttemptTarget } from "../resilience/attempts.js";
 import { openAICompatible } from "./openai-compatible.js";
-import type { ProviderAdapter } from "./types.js";
+import type { ProviderAdapter, ResumeStyle } from "./types.js";
 
 export type ProviderRegistry = ReadonlyMap<string, ProviderAdapter>;
 
@@ -57,14 +57,15 @@ export function resolveTargets(registry: ProviderRegistry, model: string): Attem
 
 export function buildRegistry(config: Config): ProviderRegistry {
   const adapters: ProviderAdapter[] = [
-    mockAdapter("mock", config.MOCK_BASE_URL),
-    mockAdapter("mock-backup", config.MOCK_BASE_URL),
+    mockAdapter("mock", "prefix", config.MOCK_BASE_URL),
+    mockAdapter("mock-backup", "prompt", config.MOCK_BASE_URL),
   ];
 
   if (config.MISTRAL_API_KEY) {
     adapters.push(
       openAICompatible({
         name: "mistral",
+        resumeStyle: "prefix",
         baseUrl: config.MISTRAL_BASE_URL,
         apiKey: config.MISTRAL_API_KEY,
         models: ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"],
@@ -101,11 +102,16 @@ export function buildRegistry(config: Config): ProviderRegistry {
  * server. In-process keeps the public demo free and dependency-less; the
  * separate server exercises real network failures.
  */
-function mockAdapter(name: string, baseUrl: string | undefined): ProviderAdapter {
+function mockAdapter(
+  name: string,
+  resumeStyle: ResumeStyle,
+  baseUrl: string | undefined,
+): ProviderAdapter {
   const inProcess = baseUrl === undefined;
   const app = inProcess ? createMockApp() : undefined;
   return openAICompatible({
     name,
+    resumeStyle,
     baseUrl: baseUrl ?? "http://mock.internal/v1",
     models: MOCK_MODELS,
     forwardHeaders: [CHAOS_HEADER],

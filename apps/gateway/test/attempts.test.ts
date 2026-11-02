@@ -20,6 +20,7 @@ function scripted(
   return {
     name: "script",
     models: ["s"],
+    resumeStyle: "prompt",
     calls,
     stream(call) {
       calls.push(call);
@@ -69,6 +70,7 @@ const run = (
     headers: new Headers(),
     signal: new AbortController().signal,
     commitOn: "first-token",
+    midStream: "abort",
     config: FAST_RESILIENCE,
     budget: generous(),
     ...overrides,

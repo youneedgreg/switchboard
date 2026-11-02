@@ -64,6 +64,18 @@ export function generateTokens(
   return words.map((word, i) => (i === 0 ? word : ` ${word}`));
 }
 
+/**
+ * The tokens that finish a partial answer, optionally repeating the end of it
+ * the way real providers sometimes do. A partial that is not the start of this
+ * answer gets the whole answer, as a model that ignored it would give.
+ */
+export function continueTokens(tokens: string[], partial: string, overlap = 0): string[] {
+  const full = tokens.join("");
+  const rest = full.startsWith(partial) ? full.slice(partial.length) : full;
+  const repeated = overlap > 0 ? partial.slice(-overlap) : "";
+  return `${repeated}${rest}`.match(/\s*\S+|\s+/g) ?? [];
+}
+
 /** Rough token estimate (~4 characters per token), good enough for a mock. */
 export function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
