@@ -2,7 +2,7 @@
 #   Gateway        http://localhost:8787   (key: GATEWAY_API_KEYS, default below)
 #   Mock provider  http://localhost:8788
 #   Grafana        http://localhost:3000   (traces, metrics, logs; admin/admin)
-# Postgres and Redis are provisioned now and used from Week 3.
+# Redis holds circuit breaker and retry budget state. Postgres is used from Week 3.
 
 name: switchboard
 
@@ -20,9 +20,12 @@ services:
       MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       MOCK_BASE_URL: http://mock-provider:8788/v1
+      REDIS_URL: redis://redis:6379
       PORT: "8787"
     depends_on:
       mock-provider:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8787/healthz"]

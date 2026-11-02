@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft. Week 1 is built; later sections describe planned work |
+| **Status** | Draft. Weeks 1 and 2 are built; later sections describe planned work |
 | **Author** | Gregory Temwa Odete |
 | **Last updated** | 2026-11-02 |
 
@@ -165,10 +165,34 @@ open.
 
 **Retry budget.** Three attempts per request would triple the load on a provider that is
 already failing. The budget caps retries as a share of recent traffic, with a small reserve so a
-quiet gateway can still retry. It is per-instance for now; a shared one in Redis comes with the
-circuit breaker.
+quiet gateway can still retry. It is shared across instances through Redis (section 4.5).
 
 Responses report the attempts used in `x-switchboard-attempts`.
+
+The life of one attempt:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Skipped: circuit open
+    [*] --> Connecting: circuit allows it
+    Skipped --> [*]: next provider, or 503 if none
+    Connecting --> Held: start event
+    Connecting --> Failed: error status, network error or first-token deadline
+    Held --> Committed: first token
+    Held --> Failed: drop, bad data or first-token deadline
+    Committed --> Finished: finish event
+    Committed --> Failed: drop, bad data or stall deadline
+    Finished --> [*]: answer complete, later failures ignored
+    Failed --> [*]: retry, fall back or resume, else report the error
+    note right of Held
+        Nothing has reached the client,
+        so failures here are invisible
+    end note
+    note right of Committed
+        The client has tokens, so failures
+        go to the mid-stream policy
+    end note
+```
 
 ### 4.4 Mid-stream failures
 
@@ -215,14 +239,44 @@ A failure after the finish chunk is ignored: the answer is complete, and at wors
 usage is missing. A stream that ends with no finish at all counts as a failure, so a broken answer
 can never look complete.
 
-### 4.5 Client disconnects
+### 4.5 Circuit breaker
+
+A provider that keeps failing makes every request spend its retries and deadlines finding that
+out. The circuit breaker remembers on their behalf, so requests move to the next provider without
+calling it. If it was the last provider, the client gets `503` with `Retry-After` and code
+`circuit_open`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Closed
+    Closed --> Open: 5 or more failures in 30 s, at least half of all calls
+    Open --> HalfOpen: 30 s cooldown passes and a request arrives
+    HalfOpen --> Closed: the probe reaches its first token
+    HalfOpen --> Open: the probe fails
+    HalfOpen --> HalfOpen: probe never reports back, its 30 s lease ends, a new request probes
+```
+
+- **What counts:** a failed attempt counts as a failure, before or after the commit point, and
+  reaching the commit point counts as a success. A `bad_request` counts as a success, since the
+  provider answered and the request was at fault.
+- **Half-open:** only one request at a time may probe. Its lease stops a client that disconnects
+  from wedging the circuit.
+- **Sharing:** with `REDIS_URL` set, the circuit breaker and retry budget are shared across
+  instances, each operation being one Lua script: atomic and one round trip. On serverless, a single
+  instance sees too little traffic to judge a provider. Without `REDIS_URL` each instance keeps its
+  own, using an in-memory version held to the same tests.
+- **When Redis fails:** a command gives up after 250 ms. The circuit then counts as closed and the
+  retry budget falls back to this instance's own count, so a Redis outage doesn't become a gateway
+  outage and retries stay capped.
+
+### 4.6 Client disconnects
 
 Each request owns an `AbortController`, and each attempt derives its own signal from it, so a
 deadline can stop one attempt without ending the request. The request's controller is aborted
 when the client's request signal fires or when the response stream is cancelled. That stops the
 upstream generation and its cost, cuts short any backoff, and prevents further attempts.
 
-### 4.6 Output formatting
+### 4.7 Output formatting
 
 The gateway re-emits chunks under **its own** response id and the model name the client sent.
 Upstream ids would change mid-response once fallbacks exist. Usage is held back and sent as the
@@ -247,6 +301,8 @@ when aggregating a non-streaming response.
 - Attempt loop: backoff, retry budget, each of the three deadlines, an adapter that ignores its
   abort, and disconnects during an attempt and during backoff. The mock's `fail_attempts` switch
   limits faults to the first N attempts, so retries can be tested end to end.
+- Circuit breaker and retry budget: one contract suite runs against the in-memory versions and
+  against real Redis in Testcontainers, along with concurrency, a Redis outage and reconnection.
 - Resume: the mock produces the same answer for the same prompt and can continue from a partial
   one, so a resumed answer must match an uninterrupted one byte for byte, including with injected
   overlap (`resume_overlap`) and across providers.

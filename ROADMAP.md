@@ -226,11 +226,11 @@ Terraform for Vercel projects, domains and environment variables, Neon, Upstash,
 
 ### Week 2: Resilience (hard part A)
 - [x] Internal event stream, error classifier
-- [x] Backoff with retry budget (per instance until the Redis work), the three deadlines
+- [x] Backoff with retry budget, the three deadlines
 - [x] Fallback chains, with Groq added as a second provider (real Groq calls still to be smoke-tested)
 - [x] Mid-stream resume and abort (real prefix and "continue" behaviour still to be smoke-tested)
 - [x] Cancel upstream on client disconnect
-- [ ] Circuit breaker in Redis
+- [x] Circuit breaker in Redis (tested on local Redis; Upstash waits on `REDIS_URL`)
 - [ ] Chaos test matrix
 - [ ] Docs: attempt and circuit-breaker state diagrams, mid-stream sequence diagram, ADR 4
 

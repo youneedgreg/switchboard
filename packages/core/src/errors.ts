@@ -9,7 +9,8 @@ export type ProviderErrorKind =
   | "network" // connection refused, reset, or stream cut off
   | "protocol" // malformed SSE / JSON, stream ended without finishing
   | "bad_request" // 400, 404, 413, 422: the request itself is wrong
-  | "auth"; // 401, 403: our provider credentials are wrong
+  | "auth" // 401, 403: our provider credentials are wrong
+  | "circuit_open"; // not called: this provider has been failing
 
 const RETRYABLE: ReadonlySet<ProviderErrorKind> = new Set([
   "rate_limited",

@@ -15,11 +15,13 @@
     "@switchboard/core": "workspace:*",
     "@switchboard/mock-provider": "workspace:*",
     "hono": "4.13.13",
+    "ioredis": "6.0.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "^24",
     "openai": "7.32.0",
+    "testcontainers": "12.2.1",
     "tsx": "4.23.15",
     "vitest": "5.0.3"
   },

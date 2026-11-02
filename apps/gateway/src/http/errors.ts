@@ -36,6 +36,11 @@ export function providerErrorResponse(error: ProviderError): {
       };
     case "timeout":
       return { status: 504, body, headers };
+    case "circuit_open":
+      if (error.retryAfterMs !== undefined) {
+        headers["retry-after"] = String(Math.ceil(error.retryAfterMs / 1000));
+      }
+      return { status: 503, body, headers };
     default:
       return { status: 502, body, headers };
   }
