@@ -3,13 +3,26 @@ import { loadConfig } from "../src/config.js";
 import { createGateway } from "../src/gateway.js";
 import { buildRegistry } from "../src/providers/registry.js";
 import type { ProviderAdapter } from "../src/providers/types.js";
+import { DEFAULT_RESILIENCE, type ResilienceConfig } from "../src/resilience/policy.js";
+import { inMemoryRetryBudget } from "../src/resilience/retry-budget.js";
 
 export const TEST_KEY = "sb_test_0123456789abcdef";
+
+export const FAST_RESILIENCE: ResilienceConfig = {
+  ...DEFAULT_RESILIENCE,
+  backoffBaseMs: 1,
+  backoffCapMs: 2,
+};
 
 export function testGateway(...extra: ProviderAdapter[]) {
   const registry = new Map(buildRegistry(loadConfig({ GATEWAY_API_KEYS: TEST_KEY })));
   for (const adapter of extra) registry.set(adapter.name, adapter);
-  return createGateway({ apiKeys: [TEST_KEY], registry });
+  return createGateway({
+    apiKeys: [TEST_KEY],
+    registry,
+    resilience: FAST_RESILIENCE,
+    retryBudget: inMemoryRetryBudget({ ratio: 1, minPerSecond: 1_000, windowSeconds: 10 }),
+  });
 }
 
 export function chatRequest(

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { kindForStatus, ProviderError, parseRetryAfter } from "../src/errors.js";
+import {
+  kindForStatus,
+  kindForStreamError,
+  ProviderError,
+  parseRetryAfter,
+} from "../src/errors.js";
 
 describe("kindForStatus", () => {
   it.each([
@@ -37,5 +42,19 @@ describe("parseRetryAfter", () => {
     expect(parseRetryAfter("Sun, 11 Oct 2026 12:00:03 GMT", now)).toBe(3000);
     expect(parseRetryAfter("garbage", now)).toBeUndefined();
     expect(parseRetryAfter(null, now)).toBeUndefined();
+  });
+});
+
+describe("kindForStreamError", () => {
+  it.each([
+    [{ type: "tokens", code: "rate_limit_exceeded" }, "rate_limited"],
+    [{ code: 429 }, "rate_limited"],
+    [{ type: "invalid_request_error" }, "bad_request"],
+    [{ code: "context_length_exceeded" }, "bad_request"],
+    [{ type: "authentication_error" }, "auth"],
+    [{ type: "server_error" }, "server"],
+    [{}, "server"],
+  ] as const)("%j -> %s", (error, kind) => {
+    expect(kindForStreamError(error)).toBe(kind);
   });
 });

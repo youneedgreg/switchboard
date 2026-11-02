@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft. Week 1 is built; later sections describe planned work |
 | **Author** | Gregory Temwa Odete |
-| **Last updated** | 2026-10-11 |
+| **Last updated** | 2026-11-02 |
 
 ## 1. Context
 
@@ -50,8 +50,7 @@ diagrams. Inside the gateway:
 
 ```
 HTTP (Hono) → auth → body limit → validate (zod) → resolve "provider/model"
-           → adapter.stream()  ──►  internal StreamEvent iterator
-           → prime (wait for first event)
+           → attempt loop: adapter.stream() → deadlines → hold until committed
            → SSE writer  or  aggregator
 ```
 
@@ -78,7 +77,8 @@ Two decisions shape everything after this:
 2. **Failures are thrown, not emitted.** An adapter throws a `ProviderError` with a `kind`
    (`rate_limited`, `server`, `timeout`, `network`, `protocol`, `bad_request`, `auth`). The kind,
    not the HTTP status, drives what happens next, because many failures (a dropped connection,
-   malformed JSON) have no status at all.
+   malformed JSON) have no status at all. Errors reported inside a `200` stream are classified
+   from their `type` and `code`, so a rate limit or a bad request is still treated as one.
 
 One adapter, `openAICompatible`, covers Mistral, Groq and the mock provider. Provider quirks are
 configuration: Mistral needs `seed` renamed to `random_seed` and rejects `stream_options`; Groq
@@ -86,12 +86,16 @@ only sends usage when asked through `stream_options.include_usage`.
 
 ### 4.2 The commit point
 
-The gateway does not send response headers until the adapter yields its first event (`prime`).
+The gateway sends nothing to the client until an attempt reaches the commit point. A streaming
+request commits at its first content or tool-call token; a role chunk alone does not count, so
+an upstream that opens a stream and dies immediately is still retried invisibly. A non-streaming
+request commits when the attempt completes, because the client sees nothing until then, so a
+failure anywhere in it can be retried.
 
-- **Before the first event**, a failure becomes a proper HTTP status: 429 (with `Retry-After`)
-  for rate limits, 504 for timeouts, the upstream status for client errors, 502 otherwise.
-  In Week 2 this window is where retries and fallbacks are invisible to the client.
-- **After the first event**, the status line is already `200`. A failure is reported in-band as
+- **Before the commit point**, a failure goes to the attempt loop (section 4.3). If no attempts
+  are left it becomes a proper HTTP status: 429 (with `Retry-After`) for rate limits, 504 for
+  timeouts, the upstream status for client errors, 502 otherwise.
+- **After the commit point**, the status line is already `200`. A failure is reported in-band as
   a final SSE `data: {"error": ...}` event, with no `[DONE]`. The OpenAI SDK turns this into an
   `APIError` while iterating. Week 2 adds the `resume` policy here.
 
@@ -104,10 +108,11 @@ sequenceDiagram
     C->>G: POST /v1/chat/completions (stream: true)
     G->>G: auth, validate, resolve provider/model
     G->>P: POST /chat/completions (stream: true)
-    P-->>G: 200 + first chunk
+    P-->>G: 200 + role chunk (held)
+    P-->>G: first token
     Note over G: commit point: headers sent only now
-    G-->>C: 200 text/event-stream, role chunk
-    loop each token
+    G-->>C: 200 text/event-stream, role chunk, first token
+    loop each remaining token
         P-->>G: data: {delta}
         G-->>C: data: {delta} (gateway id + model)
     end
@@ -115,13 +120,42 @@ sequenceDiagram
     G-->>C: finish chunk, usage chunk (if asked), [DONE]
 ```
 
-### 4.3 Client disconnects
+### 4.3 The attempt loop
 
-Each request owns an `AbortController` for its upstream call. It is aborted when the client's
-request signal fires or when the response stream is cancelled, so a client that leaves stops
-the upstream generation and the cost with it.
+Each failed attempt is classified by its `ProviderError.kind`. `bad_request` and `auth` never
+retry, since the same request would fail the same way. Everything else retries until one of these
+stops it:
 
-### 4.4 Output formatting
+| Limit | Default | Notes |
+|---|---|---|
+| Attempts | 3 | Including the first |
+| `Retry-After` | 5 s | A provider asking for longer is not waited for; its 429 goes to the client |
+| Total deadline | 120 s | Covers every attempt and backoff; a wait that would outlast it is skipped |
+| Retry budget | 10% of requests, plus 1 per second | Per provider, over a 10 s window |
+
+The wait between attempts is exponential backoff with full jitter (a uniform pick up to a ceiling
+that doubles from 200 ms to 4 s), or `Retry-After` if that is longer.
+
+**Deadlines.** An attempt fails with `timeout` if its first token takes over 20 s, measured from the
+start of the attempt, or if 10 s pass between events after that. Timers race each read rather
+than relying on the adapter to notice an abort, so a stuck upstream can never hold a request
+open.
+
+**Retry budget.** Three attempts per request would triple the load on a provider that is
+already failing. The budget caps retries as a share of recent traffic, with a small reserve so a
+quiet gateway can still retry. It is per-instance for now; a shared one in Redis comes with the
+circuit breaker.
+
+Responses report the attempts used in `x-switchboard-attempts`.
+
+### 4.4 Client disconnects
+
+Each request owns an `AbortController`, and each attempt derives its own signal from it, so a
+deadline can stop one attempt without ending the request. The request's controller is aborted
+when the client's request signal fires or when the response stream is cancelled. That stops the
+upstream generation and its cost, cuts short any backoff, and prevents further attempts.
+
+### 4.5 Output formatting
 
 The gateway re-emits chunks under **its own** response id and the model name the client sent.
 Upstream ids would change mid-response once fallbacks exist. Usage is held back and sent as the
@@ -143,14 +177,14 @@ when aggregating a non-streaming response.
   classification, chaos parsing.
 - Gateway behaviour against the in-process mock: every failure mode before and after the commit
   point, tool-call aggregation, client cancellation aborting upstream.
+- Attempt loop: backoff, retry budget, each of the three deadlines, an adapter that ignores its
+  abort, and disconnects during an attempt and during backoff. The mock's `fail_attempts` switch
+  limits faults to the first N attempts, so retries can be tested end to end.
 - **Compatibility:** the official `openai` SDK against a real listening gateway: models, plain
   and streamed completions, usage chunks, `RateLimitError`, mid-stream `APIError`, and abort.
 
 ## 7. Open questions
 
-- **Week 2:** timeouts (time to first token, stall between tokens, total), retry budget, and the
-  mid-stream `resume` policy. See the roadmap.
+- **Week 2:** the mid-stream `resume` policy and fallback chains. See the roadmap.
 - **Week 3:** per-key budgets require a cost estimate before the call; the maximum is
   `max_tokens` × output price, but most requests omit `max_tokens`.
-- Should the commit point move later than the first event, for example to the first content
-  token, so that a role chunk followed by an immediate failure is still retryable invisibly?

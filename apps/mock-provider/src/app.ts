@@ -14,7 +14,15 @@ import {
 } from "@switchboard/core";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { CHAOS_HEADER, type Chaos, ChaosParseError, failureStatus, parseChaos } from "./chaos.js";
+import {
+  ATTEMPT_HEADER,
+  CHAOS_HEADER,
+  type Chaos,
+  ChaosParseError,
+  chaosForAttempt,
+  failureStatus,
+  parseChaos,
+} from "./chaos.js";
 import { estimateTokens, generateTokens, MOCK_MODELS, type MockModel, mulberry32 } from "./text.js";
 
 function errorBody(message: string, type: string, code: string | null = null): OpenAIErrorBody {
@@ -46,7 +54,10 @@ export function createMockApp(): Hono {
   app.post("/v1/chat/completions", async (c) => {
     let chaos: Chaos;
     try {
-      chaos = parseChaos(c.req.header(CHAOS_HEADER));
+      chaos = chaosForAttempt(
+        parseChaos(c.req.header(CHAOS_HEADER)),
+        Number(c.req.header(ATTEMPT_HEADER) ?? 1),
+      );
     } catch (error) {
       if (error instanceof ChaosParseError) {
         return c.json(errorBody(error.message, "invalid_request_error", "invalid_chaos"), 400);

@@ -10,6 +10,8 @@
 import { z } from "zod";
 
 export const CHAOS_HEADER = "x-mock-chaos";
+/** Sent by the gateway so faults can target particular attempts. */
+export const ATTEMPT_HEADER = "x-mock-attempt";
 
 const ms = z.coerce.number().int().min(0).max(120_000);
 const position = z.coerce.number().int().min(0).max(100_000);
@@ -35,6 +37,8 @@ export const Chaos = z.strictObject({
   malformed_after: position.optional(),
   /** Send an in-stream error object before token N, then end the stream. */
   error_after: position.optional(),
+  /** Apply the faults above only to the first N attempts; later ones succeed. */
+  fail_attempts: z.coerce.number().int().min(0).max(100).optional(),
   /** Seed for deterministic output and fail_rate decisions. */
   seed: z.coerce.number().int().optional(),
 });
@@ -62,6 +66,12 @@ export function parseChaos(header: string | null | undefined): Chaos {
   const result = Chaos.safeParse(Object.fromEntries(entries));
   if (!result.success) throw new ChaosParseError(z.prettifyError(result.error));
   return result.data;
+}
+
+/** The chaos in effect for this attempt: once past fail_attempts, only the shape remains. */
+export function chaosForAttempt(chaos: Chaos, attempt: number): Chaos {
+  if (chaos.fail_attempts === undefined || attempt <= chaos.fail_attempts) return chaos;
+  return Chaos.parse({ tokens: chaos.tokens, seed: chaos.seed });
 }
 
 /** The status to fail with for this request, or undefined to succeed. */

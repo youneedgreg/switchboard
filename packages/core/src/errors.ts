@@ -67,6 +67,24 @@ export function kindForStatus(status: number): ProviderErrorKind {
   return "bad_request";
 }
 
+/**
+ * Providers can report a failure inside a 200 stream, where there is no status.
+ * Their error's code and type say whether it is the request's fault, which must
+ * not be retried, or a passing upstream problem.
+ */
+export function kindForStreamError(error: {
+  type?: string;
+  code?: string | number | null;
+}): ProviderErrorKind {
+  const label = `${error.type ?? ""} ${error.code ?? ""}`.toLowerCase();
+  if (/rate_limit|\b429\b/.test(label)) return "rate_limited";
+  if (/auth|permission|\b40[13]\b/.test(label)) return "auth";
+  if (/invalid_request|context_length|content_filter|\b4(00|04|13|22)\b/.test(label)) {
+    return "bad_request";
+  }
+  return "server";
+}
+
 /** Retry-After is either delta-seconds or an HTTP date. */
 export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
   if (!value) return undefined;

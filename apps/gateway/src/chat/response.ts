@@ -20,31 +20,6 @@ export interface ResponseMeta {
   model: string;
 }
 
-/**
- * Waits for the first event before anything is sent to the client. Until then
- * a failure can still become a proper HTTP status (and, from Week 2, be
- * retried invisibly). The returned iterator replays that first event.
- */
-export async function prime(
-  events: AsyncIterable<StreamEvent>,
-): Promise<AsyncIterator<StreamEvent>> {
-  const iterator = events[Symbol.asyncIterator]();
-  const first = await iterator.next();
-  let replayed = false;
-  return {
-    next() {
-      if (!replayed) {
-        replayed = true;
-        return Promise.resolve(first);
-      }
-      return iterator.next();
-    },
-    return(value?: unknown) {
-      return iterator.return?.(value) ?? Promise.resolve({ done: true, value: undefined });
-    },
-  };
-}
-
 function toUsage(event: Extract<StreamEvent, { type: "usage" }>): Usage {
   return {
     prompt_tokens: event.inputTokens,
@@ -122,7 +97,7 @@ export function sseBody(
         }
       } catch (error) {
         // Headers are already sent, so the failure is reported in-band, the
-        // same way OpenAI does. Week 2 replaces this with resume/fallback.
+        // same way OpenAI does.
         controller.enqueue(encoder.encode(encodeSse(JSON.stringify(streamErrorBody(error)))));
         controller.close();
         closed = true;

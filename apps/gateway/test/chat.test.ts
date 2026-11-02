@@ -98,9 +98,9 @@ describe("upstream failures before any output", () => {
 
   it("maps a stream that dies before the first token to 502", async () => {
     const res = await chat({ model: "mock/mock-lorem", stream: true }, "drop_after=0");
-    // The role chunk arrives first, so this fails after "start": in-band error.
-    const events = await sseData(res);
-    expect(JSON.parse(events.at(-1) as string).error.code).toBe("network");
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("network");
   });
 });
 
@@ -234,6 +234,7 @@ describe("Mistral adapter", () => {
         stream_options: { include_usage: true },
       },
       headers: new Headers(),
+      attempt: 1,
       signal: new AbortController().signal,
     })) {
       events.push(event);

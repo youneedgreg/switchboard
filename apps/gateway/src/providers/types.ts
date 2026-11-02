@@ -6,6 +6,8 @@ export interface ProviderCall {
   body: ChatCompletionRequest;
   /** The client's request headers; adapters choose which, if any, to forward. */
   headers: Headers;
+  /** 1 for the first try at this request. */
+  attempt: number;
   signal: AbortSignal;
 }
 

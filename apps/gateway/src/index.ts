@@ -3,7 +3,7 @@
  * detection requires this file to import "hono" itself.
  */
 import type { Hono } from "hono";
-import { loadConfig } from "./config.js";
+import { loadConfig, resilienceConfig } from "./config.js";
 import { createGateway } from "./gateway.js";
 import { buildRegistry } from "./providers/registry.js";
 
@@ -12,6 +12,7 @@ const config = loadConfig();
 const app: Hono = createGateway({
   apiKeys: config.GATEWAY_API_KEYS,
   registry: buildRegistry(config),
+  resilience: resilienceConfig(config),
 });
 
 export default app;

@@ -6,6 +6,7 @@
 import {
   type ChatCompletionRequest,
   type FinishReason,
+  kindForStreamError,
   ProviderError,
   parseSse,
   type StreamEvent,
@@ -23,6 +24,8 @@ export interface OpenAICompatibleConfig {
   requestUsage?: boolean;
   /** Client headers forwarded upstream unchanged. */
   forwardHeaders?: readonly string[];
+  /** Sends the attempt number upstream in this header (mock provider only). */
+  attemptHeader?: string;
   /** Rewrite the request body for upstream quirks. */
   transformBody?: (body: Record<string, unknown>) => Record<string, unknown>;
 }
@@ -35,7 +38,7 @@ interface UpstreamChunk {
     finish_reason?: string | null;
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number } | null;
-  error?: { message?: string };
+  error?: { message?: string; type?: string; code?: string | number | null };
 }
 
 const FINISH_REASONS: Record<string, FinishReason> = {
@@ -45,7 +48,6 @@ const FINISH_REASONS: Record<string, FinishReason> = {
   tool_calls: "tool_calls",
   function_call: "tool_calls",
   content_filter: "content_filter",
-  error: "error",
 };
 
 export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapter {
@@ -56,9 +58,10 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
     model,
     body,
     headers,
+    attempt,
     signal,
   }: ProviderCall): AsyncGenerator<StreamEvent> {
-    const response = await send(model, body, headers, signal);
+    const response = await send(model, body, headers, attempt, signal);
     if (!response.body) {
       throw new ProviderError({
         provider: name,
@@ -76,7 +79,7 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
         if (chunk.error) {
           throw new ProviderError({
             provider: name,
-            kind: "server",
+            kind: kindForStreamError(chunk.error),
             message: `${name} stream error: ${chunk.error.message ?? "unknown"}`,
           });
         }
@@ -101,6 +104,13 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
             inputTokens: chunk.usage.prompt_tokens ?? 0,
             outputTokens: chunk.usage.completion_tokens ?? 0,
           };
+        }
+        if (choice?.finish_reason === "error") {
+          throw new ProviderError({
+            provider: name,
+            kind: "server",
+            message: `${name} finished the stream with an error`,
+          });
         }
         if (choice?.finish_reason) {
           finished = true;
@@ -130,6 +140,7 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
     model: string,
     body: ChatCompletionRequest,
     clientHeaders: Headers,
+    attempt: number,
     signal: AbortSignal,
   ): Promise<Response> {
     // stream_options is the gateway's business with its own client, not upstream's.
@@ -151,6 +162,7 @@ export function openAICompatible(config: OpenAICompatibleConfig): ProviderAdapte
       const value = clientHeaders.get(header);
       if (value !== null) headers[header] = value;
     }
+    if (config.attemptHeader) headers[config.attemptHeader] = String(attempt);
 
     let response: Response;
     try {

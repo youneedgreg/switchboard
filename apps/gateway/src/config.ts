@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { DEFAULT_RESILIENCE, type ResilienceConfig } from "./resilience/policy.js";
+
+const positiveMs = z.coerce.number().int().positive();
 
 const Env = z.object({
   GATEWAY_API_KEYS: z
@@ -16,6 +19,10 @@ const Env = z.object({
   GROQ_BASE_URL: z.url().default("https://api.groq.com/openai/v1"),
   MOCK_BASE_URL: z.url().optional(),
   PORT: z.coerce.number().int().positive().default(8787),
+  RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(DEFAULT_RESILIENCE.maxAttempts),
+  DEADLINE_FIRST_TOKEN_MS: positiveMs.default(DEFAULT_RESILIENCE.firstTokenMs),
+  DEADLINE_STALL_MS: positiveMs.default(DEFAULT_RESILIENCE.stallMs),
+  DEADLINE_TOTAL_MS: positiveMs.default(DEFAULT_RESILIENCE.totalMs),
 });
 
 export type Config = z.infer<typeof Env>;
@@ -28,4 +35,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     throw new Error(`Invalid gateway configuration:\n${z.prettifyError(result.error)}`);
   }
   return result.data;
+}
+
+export function resilienceConfig(config: Config): ResilienceConfig {
+  return {
+    ...DEFAULT_RESILIENCE,
+    maxAttempts: config.RETRY_MAX_ATTEMPTS,
+    firstTokenMs: config.DEADLINE_FIRST_TOKEN_MS,
+    stallMs: config.DEADLINE_STALL_MS,
+    totalMs: config.DEADLINE_TOTAL_MS,
+  };
 }
